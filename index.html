@@ -26,6 +26,9 @@
                     <div class="wave-badge">
                         <span id="waveDisplay">Wave 1 / 4</span>
                     </div>
+                    <div class="score-badge">
+                        <span id="scoreDisplay">Score: 0</span>
+                    </div>
                 </div>
 
                 <div class="base-bar-container enemy">
@@ -163,7 +166,11 @@
                 <div class="result-icon">👑</div>
                 <h2 class="result-title">VICTORY!!</h2>
                 <p class="result-desc">敵軍要塞を完全制圧しました！</p>
-                <button id="btn-retry-win" class="modal-btn">もう一度プレイ</button>
+                <p id="victoryScoreText" class="result-score">スコア: 0（ベスト: 0）</p>
+                <div class="result-btn-row">
+                    <button id="btn-loop-continue" class="modal-btn loop-btn">🔁 強くてニューゲーム</button>
+                    <button id="btn-retry-win" class="modal-btn">もう一度プレイ</button>
+                </div>
             </div>
         </div>
 
@@ -173,6 +180,7 @@
                 <div class="result-icon">💥</div>
                 <h2 class="result-title">DEFEATED...</h2>
                 <p class="result-desc">自陣ゲートが突破されました...</p>
+                <p id="defeatScoreText" class="result-score">スコア: 0（ベスト: 0）</p>
                 <button id="btn-retry" class="modal-btn">リトライ</button>
             </div>
         </div>

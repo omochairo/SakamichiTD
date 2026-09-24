@@ -39,6 +39,78 @@ class GameManager {
         this.titanBoss = null;
         this.enemiesSpawnedInWave = 0;
         this.waveTotalEnemies = 10;
+        this.wave3MidBossSpawned = false;
+
+        // レリック3択モーダルの多重起動ガード
+        this.relicModalOpen = false;
+
+        // 強くてニューゲーム（周回）＆ スコア
+        this.loopCount = 0;
+        this.score = 0;
+        this.bestScore = Number(localStorage.getItem('sakamichiTD_bestScore') || 0);
+    }
+
+    addScore(amount) {
+        this.score += Math.round(amount);
+    }
+
+    saveBestScoreIfNeeded() {
+        if (this.score > this.bestScore) {
+            this.bestScore = this.score;
+            localStorage.setItem('sakamichiTD_bestScore', String(this.bestScore));
+        }
+    }
+
+    finalizeVictory() {
+        this.isVictory = true;
+        window.soundEngine.playVictory();
+        this.saveBestScoreIfNeeded();
+        const scoreEl = document.getElementById('victoryScoreText');
+        if (scoreEl) scoreEl.textContent = `スコア: ${this.score}（ベスト: ${this.bestScore}）`;
+        const loopBtn = document.getElementById('btn-loop-continue');
+        if (loopBtn) loopBtn.textContent = `🔁 強くてニューゲーム (${this.loopCount + 2}周目へ)`;
+        document.getElementById('victoryModal')?.classList.remove('hidden');
+    }
+
+    finalizeDefeat() {
+        this.isGameOver = true;
+        window.soundEngine.playDefeat();
+        this.saveBestScoreIfNeeded();
+        const scoreEl = document.getElementById('defeatScoreText');
+        if (scoreEl) scoreEl.textContent = `スコア: ${this.score}（ベスト: ${this.bestScore}）`;
+        document.getElementById('defeatModal')?.classList.remove('hidden');
+    }
+
+    // 強くてニューゲーム：レリックとスコアを引き継いだまま、敵を強化してWave1から周回する
+    startNewGamePlus() {
+        this.loopCount++;
+        this.isVictory = false;
+        this.isGameOver = false;
+        this.relicModalOpen = false;
+        document.getElementById('victoryModal')?.classList.add('hidden');
+
+        if (this.stage !== 2) this.toggleStage();
+
+        this.allyBase.hp = this.allyBase.maxHp;
+        this.enemyBase.hasBarrier = true;
+        this.enemyBase.hp = this.enemyBase.maxHp;
+
+        this.combatManager.clearAllAllies();
+        this.combatManager.enemies = [];
+        this.bossSpawned = false;
+        this.titanBoss = null;
+
+        this.startWave(1);
+    }
+
+    // 敵ステータスに周回インフレ倍率を適用（強くてニューゲーム用）
+    applyLoopScaling(enemy) {
+        if (this.loopCount <= 0) return;
+        const mult = 1 + this.loopCount * 0.35;
+        enemy.maxHp = Math.round(enemy.maxHp * mult);
+        enemy.hp = enemy.maxHp;
+        enemy.atk = Math.round(enemy.atk * mult);
+        enemy.manaReward = Math.round(enemy.manaReward * (1 + this.loopCount * 0.5));
     }
 
     init() {
@@ -121,6 +193,7 @@ class GameManager {
 
         // ボスWaveへ即時スキップボタン
         document.getElementById('btn-skip-boss')?.addEventListener('click', () => {
+            if (this.isGameOver || this.isVictory) return;
             this.startWave(4);
         });
 
@@ -136,6 +209,7 @@ class GameManager {
             else if (e.key.toLowerCase() === 'e') this.skillManager.triggerSkill('pinball_fever');
             else if (e.key.toLowerCase() === 'm') {
                 this.infiniteMana = !this.infiniteMana;
+                if (this.infiniteMana) this.mana = this.maxMana;
                 this.updateDebugUI();
             } else if (e.key.toLowerCase() === 'r') {
                 this.openRelicModal();
@@ -144,7 +218,7 @@ class GameManager {
             } else if (e.key.toLowerCase() === 't') {
                 this.toggleStage();
             } else if (e.key.toLowerCase() === 'b') {
-                this.startWave(4);
+                if (!this.isGameOver && !this.isVictory) this.startWave(4);
             } else if (e.code === 'Space') {
                 this.isPaused = !this.isPaused;
             }
@@ -153,11 +227,19 @@ class GameManager {
         // リトライボタン
         document.getElementById('btn-retry')?.addEventListener('click', () => location.reload());
         document.getElementById('btn-retry-win')?.addEventListener('click', () => location.reload());
+
+        // 強くてニューゲーム（周回）ボタン
+        document.getElementById('btn-loop-continue')?.addEventListener('click', () => {
+            this.startNewGamePlus();
+        });
     }
 
     toggleStage() {
+        const oldTotalLength = this.coursePath.totalLength;
         this.stage = this.stage === 1 ? 2 : 1;
         this.coursePath = this.stage === 1 ? createStage1Path() : createStage2Path();
+        const newTotalLength = this.coursePath.totalLength;
+        const ratio = oldTotalLength > 0 ? newTotalLength / oldTotalLength : 1;
 
         this.allyBase.x = this.coursePath.allyGate.x;
         this.allyBase.y = this.coursePath.allyGate.y;
@@ -168,13 +250,15 @@ class GameManager {
         this.combatManager.setCoursePath(this.coursePath);
         this.skillManager.setCoursePath(this.coursePath);
 
-        // 既存ユニットの位置補正
+        // 既存ユニットの位置補正（コース総延長比でsを再スケールしてから再投影する）
         this.combatManager.allies.forEach(a => {
             a.coursePath = this.coursePath;
+            a.s *= ratio;
             a.updateCoordinates();
         });
         this.combatManager.enemies.forEach(e => {
             e.coursePath = this.coursePath;
+            e.s *= ratio;
             e.updateCoordinates();
         });
 
@@ -226,6 +310,7 @@ class GameManager {
         this.enemySpawnTimer = 0;
         this.enemiesSpawnedInWave = 0;
         this.bossDefeatedTriggered = false;
+        this.wave3MidBossSpawned = false;
 
         // Waveごとの敵部隊総数設定
         if (this.wave === 1) this.waveTotalEnemies = 10;
@@ -249,6 +334,7 @@ class GameManager {
 
             // 超巨神タイタンボスを左下要塞から出撃！
             const titan = new Enemy(this.coursePath.totalLength, 'TITAN_GOLEM', this.coursePath);
+            this.applyLoopScaling(titan);
             this.combatManager.addEnemy(titan);
             this.titanBoss = titan;
             this.enemiesSpawnedInWave++;
@@ -263,8 +349,9 @@ class GameManager {
         this.waveTimer += dt;
         this.enemySpawnTimer += dt;
 
-        // スポーン間隔
-        let spawnInterval = Math.max(1.8, 3.8 - this.wave * 0.4);
+        // スポーン間隔（3体まとめて出た後に一息つく緩急のあるテンポ）
+        let spawnInterval = Math.max(1.6, 3.8 - this.wave * 0.4);
+        if (this.enemiesSpawnedInWave % 4 === 3) spawnInterval *= 1.8;
 
         if (this.enemiesSpawnedInWave < this.waveTotalEnemies && this.enemySpawnTimer >= spawnInterval) {
             this.enemySpawnTimer = 0;
@@ -286,6 +373,9 @@ class GameManager {
                 this.effectManager.triggerBossDefeated('👑 BOSS DEFEATED! 残敵を殲滅せよ！', 3.5);
                 this.effectManager.spawnExplosion(this.titanBoss.x, this.titanBoss.y, 110);
                 window.soundEngine.playExplosion();
+                this.addScore(1000);
+                // ボス撃破後は護衛の追加湧きを打ち止めにし、残存部隊の掃討に集中させる
+                this.enemiesSpawnedInWave = this.waveTotalEnemies;
             }
 
             // ② 【完全制圧の厳格判定】タイタンボスを撃破し、かつ、すべての残存敵部隊が全滅したときに初めて完全勝利！
@@ -293,9 +383,7 @@ class GameManager {
                 this.enemyBase.hasBarrier = false;
                 this.enemyBase.hp = 0;
                 this.effectManager.spawnExplosion(this.enemyBase.x, this.enemyBase.y, 120);
-                this.isVictory = true;
-                window.soundEngine.playVictory();
-                document.getElementById('victoryModal')?.classList.remove('hidden');
+                this.finalizeVictory();
             }
         }
     }
@@ -306,7 +394,12 @@ class GameManager {
 
         if (this.wave === 1) {
             // Wave 1: ゴブリン歩兵 ＋ 酸液自爆スライム（ピンポン単騎だと自爆で溶かされる）
-            enemyKey = Math.random() < 0.65 ? 'GOBLIN' : 'ACID_SLIME';
+            // 終盤（9体目）にトルネード・ゴーレムを1体だけ混ぜ、Wave2の"予告編"にする
+            if (this.enemiesSpawnedInWave === 8) {
+                enemyKey = 'TORNADO_GOLEM';
+            } else {
+                enemyKey = Math.random() < 0.65 ? 'GOBLIN' : 'ACID_SLIME';
+            }
         } else if (this.wave === 2) {
             // Wave 2: トルネード・ゴーレム（吹き飛ばし突風）＋ 重装シールド兵 ＋ アーチャー ＋ ゴブリン
             const r = Math.random();
@@ -316,12 +409,19 @@ class GameManager {
             else enemyKey = 'GOBLIN';
         } else if (this.wave === 3) {
             // Wave 3: トルネード・ゴーレム ＋ 重装ブルドーザー ＋ シャドウ・ゴースト ＋ スピードウルフ
-            const r = Math.random();
-            if (r < 0.30) enemyKey = 'TORNADO_GOLEM';
-            else if (r < 0.55) enemyKey = 'BULLDOZER';
-            else if (r < 0.75) enemyKey = 'GHOST';
-            else if (r < 0.90) enemyKey = 'WOLF';
-            else enemyKey = 'ARCHER';
+            // 終盤（10体目）に死蔵されていたアイアンゴーレムを中ボスとして1体だけ投入し、Wave4への踏み台にする
+            if (this.enemiesSpawnedInWave === 9 && !this.wave3MidBossSpawned) {
+                this.wave3MidBossSpawned = true;
+                enemyKey = 'GOLEM_BOSS';
+                this.effectManager.spawnDamageText(this.enemyBase.x, this.enemyBase.y - 40, '⚔️ 中ボス出現！', true, '#f39c12');
+            } else {
+                const r = Math.random();
+                if (r < 0.30) enemyKey = 'TORNADO_GOLEM';
+                else if (r < 0.55) enemyKey = 'BULLDOZER';
+                else if (r < 0.75) enemyKey = 'GHOST';
+                else if (r < 0.90) enemyKey = 'WOLF';
+                else enemyKey = 'ARCHER';
+            }
         } else if (this.wave >= 4) {
             // Wave 4: タイタンボスの親衛隊部隊（トルネード ＋ ブルドーザー ＋ アーチャー ＋ 酸スライム）
             const r = Math.random();
@@ -332,12 +432,14 @@ class GameManager {
         }
 
         const enemy = new Enemy(this.coursePath.totalLength, enemyKey, this.coursePath);
+        this.applyLoopScaling(enemy);
         this.combatManager.addEnemy(enemy);
     }
 
     onWaveClear() {
         this.waveActive = false;
         window.soundEngine.playVictory();
+        this.addScore(300 * this.wave);
 
         if (this.wave < this.maxWave) {
             this.openRelicModal(() => {
@@ -347,6 +449,10 @@ class GameManager {
     }
 
     openRelicModal(callbackOnSelect = null) {
+        // 自動表示中のモーダル（Wave進行コールバック保持）をデバッグ操作が上書きして
+        // 進行不能になる事故を防ぐガード
+        if (this.relicModalOpen) return;
+
         const options = this.skillManager.getRandomRelicOptions(3);
         const modal = document.getElementById('relicModal');
         const container = document.getElementById('relicCardsContainer');
@@ -357,6 +463,7 @@ class GameManager {
             return;
         }
 
+        this.relicModalOpen = true;
         this.isPaused = true;
 
         options.forEach(relic => {
@@ -371,6 +478,7 @@ class GameManager {
             card.addEventListener('click', () => {
                 this.skillManager.acquireRelic(relic);
                 modal.classList.add('hidden');
+                this.relicModalOpen = false;
                 this.isPaused = false;
                 this.renderActiveRelicsUI();
                 if (callbackOnSelect) callbackOnSelect();
@@ -430,15 +538,11 @@ class GameManager {
 
             if (!this.isGameOver && !this.isVictory) {
                 if (this.allyBase.hp <= 0) {
-                    this.isGameOver = true;
-                    window.soundEngine.playDefeat();
-                    document.getElementById('defeatModal')?.classList.remove('hidden');
+                    this.finalizeDefeat();
                 } else if (this.enemyBase.hp <= 0 && !this.enemyBase.hasBarrier) {
                     // 敵要塞破壊による完全制圧（バリア解除後、かつ敵部隊が残っていない場合）
                     if (!this.bossSpawned || (this.titanBoss && !this.titanBoss.isAlive && this.combatManager.enemies.length === 0)) {
-                        this.isVictory = true;
-                        window.soundEngine.playVictory();
-                        document.getElementById('victoryModal')?.classList.remove('hidden');
+                        this.finalizeVictory();
                     }
                 }
             }
@@ -546,6 +650,13 @@ class GameManager {
     }
 
     updateHUD() {
+        const scoreDisplay = document.getElementById('scoreDisplay');
+        if (scoreDisplay) {
+            scoreDisplay.textContent = this.loopCount > 0
+                ? `Score: ${this.score} (${this.loopCount + 1}周目)`
+                : `Score: ${this.score}`;
+        }
+
         const manaBar = document.getElementById('manaFill');
         const manaText = document.getElementById('manaText');
         if (manaBar && manaText) {

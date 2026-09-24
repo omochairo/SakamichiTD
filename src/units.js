@@ -91,15 +91,33 @@ class Ball extends BaseUnit {
         // トゲ玉の継続ダメージタイマー
         this.spikeTimer = 0;
 
+        // 派生ステータス（マージ・雪だるま成長・ジェットの各増分を独立管理し、
+        // 互いの上書きによる打ち消し合いを防ぐ）
+        this.basePushPower = config.pushPower;
+        this.mergePushBonus = 0;
+        this.jetPushBonus = 0;
+        this.growthPushBonus = 0;
+        this.mergeScale = 1.0;
+        this.growthScale = 1.0;
+
         // レリックによる初期補正
+        this.hasJet = false;
         if (relicState.jet_engine) {
             this.baseSpeed += 80;
             this.maxSpeed += 120;
-            this.pushPower += 2;
+            this.currentSpeed += 80; // 説明文どおり突進初速にも反映
+            this.jetPushBonus = 2;
             this.hasJet = true;
         }
 
         this.relicState = relicState;
+        this.recomputeDerivedStats();
+    }
+
+    // マージ・雪だるま成長・ジェットの効果を合成して最終ステータスへ反映
+    recomputeDerivedStats() {
+        this.scaleMultiplier = Math.min(3.2, this.mergeScale * this.growthScale);
+        this.pushPower = this.basePushPower + this.mergePushBonus + this.jetPushBonus + this.growthPushBonus;
     }
 
     // 同種ボールとの合体進化
@@ -111,8 +129,9 @@ class Ball extends BaseUnit {
         this.maxHp = Math.round((this.maxHp + other.maxHp) * 1.35);
         this.hp = this.maxHp; // 体力全快
         this.atk = Math.round(this.atk * 1.85);
-        this.pushPower += (other.pushPower + 1);
-        this.scaleMultiplier = Math.min(2.8, this.scaleMultiplier * 1.3);
+        this.mergePushBonus += (other.pushPower + 1);
+        this.mergeScale = Math.min(2.8, this.mergeScale * 1.3);
+        this.recomputeDerivedStats();
 
         // ボムボールの爆発範囲拡張
         if (this.config.isBomb) {
@@ -154,11 +173,12 @@ class Ball extends BaseUnit {
             const spinDir = this.tx >= 0 ? 1 : -1;
             this.rotation += spinDir * (deltaS / (this.radius * this.scaleMultiplier)) * this.spinMultiplier;
 
-            // 雪だるま式（ジャイアント）レリック
+            // 雪だるま式（ジャイアント）レリック：マージ・ジェット強化を打ち消さないよう加算合成
             if (this.relicState.snowman_growth) {
-                const growth = Math.min(2.5, 1.0 + (this.distanceTravelled / 600) * 1.5);
-                this.scaleMultiplier = growth;
-                this.pushPower = Math.round(this.config.pushPower * growth);
+                const growth = Math.min(2.2, 1.0 + (this.distanceTravelled / 600) * 1.2);
+                this.growthScale = growth;
+                this.growthPushBonus = Math.round(this.basePushPower * (growth - 1));
+                this.recomputeDerivedStats();
             }
 
             // スーパーボールのピョンピョン跳ね
@@ -196,7 +216,7 @@ class Ball extends BaseUnit {
             }
         } else {
             this.attackTimer += dt;
-            if (this.config.id === 'spike') {
+            if (this.config.id === 'spike' || (this.config.id === 'pingpong' && this.relicState.sharp_spikes)) {
                 this.spikeTimer += dt;
             }
         }
@@ -425,6 +445,7 @@ class Enemy extends BaseUnit {
         this.bossArmor = config.bossArmor || 0;
         this.roarInterval = config.roarInterval || 0;
         this.roarTimer = 0;
+        this.roarTelegraphed = false;
         this.titanAuraPulse = 0;
 
         this.ghostFlicker = 0;
@@ -580,9 +601,10 @@ class Enemy extends BaseUnit {
         // タイタンボスの禍々しい赤黒オーラ脈動
         if (this.isTitan) {
             ctx.save();
-            const pulseSize = this.radius * 1.2 + Math.sin(this.titanAuraPulse) * 4;
-            ctx.strokeStyle = 'rgba(214, 48, 49, 0.6)';
-            ctx.lineWidth = 3;
+            const auraAmp = this.roarTelegraphed ? 11 : 4;
+            const pulseSize = this.radius * 1.2 + Math.sin(this.titanAuraPulse * (this.roarTelegraphed ? 3 : 1)) * auraAmp;
+            ctx.strokeStyle = this.roarTelegraphed ? 'rgba(241, 196, 15, 0.85)' : 'rgba(214, 48, 49, 0.6)';
+            ctx.lineWidth = this.roarTelegraphed ? 4 : 3;
             ctx.setLineDash([8, 6]);
             ctx.beginPath();
             ctx.arc(0, 0, pulseSize, 0, Math.PI * 2);

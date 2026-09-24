@@ -296,7 +296,7 @@ const BALL_TYPES = {
         spinMultiplier: 1.3,
         canKnockback: true,
         immuneKnockback: false,
-        spikeDps: 28,
+        spikeDps: 22,
     },
     SUPER: {
         id: 'super',
@@ -325,7 +325,7 @@ const BALL_TYPES = {
         name: 'ボムボール',
         cost: 105,
         cooldown: 4.5,
-        hp: 95,
+        hp: 125,
         atk: 130,
         attackInterval: 99,
         radius: 17,
@@ -401,7 +401,14 @@ const RELIC_POOL = [
         name: 'マグネット吸着',
         rarity: 'EPIC',
         icon: '🧲',
-        desc: '同種の味方ボール同士が接近すると合体！巨大化してHP合算＋攻撃力1.8倍の強化ボールへ進化！',
+        desc: '味方ボールに磁力が宿り、同種マージ合体の判定距離が大幅に拡大！離れていてもどんどん合体しやすくなる！',
+    },
+    {
+        id: 'resonance_core',
+        name: '共鳴コア',
+        rarity: 'EPIC',
+        icon: '🔮',
+        desc: 'ボールが合体進化する度に、マナ+15回復＆周囲80px以内の味方ボールの攻撃タイマーが加速する！',
     },
     {
         id: 'heavy_impact',
