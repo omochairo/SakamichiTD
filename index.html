@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>坂道TD - 縦型転がりラインディフェンス × ローグライト</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="game-app">
+        <!-- トップHUD: 拠点HP & ウェーブ -->
+        <header id="game-hud">
+            <div class="hud-bases">
+                <div class="base-bar-container ally">
+                    <div class="base-label">🏰 自陣ゲート</div>
+                    <div class="bar-outer">
+                        <div id="allyHpFill" class="bar-fill"></div>
+                    </div>
+                    <div id="allyHpText" class="bar-text">600 / 600</div>
+                </div>
+
+                <div class="header-badges">
+                    <div class="stage-badge">
+                        <span id="stageDisplay">Stage 1 - クラシックスロープ</span>
+                    </div>
+                    <div class="wave-badge">
+                        <span id="waveDisplay">Wave 1 / 4</span>
+                    </div>
+                </div>
+
+                <div class="base-bar-container enemy">
+                    <div class="base-label">💀 敵要塞</div>
+                    <div class="bar-outer">
+                        <div id="enemyHpFill" class="bar-fill"></div>
+                    </div>
+                    <div id="enemyHpText" class="bar-text">1500 / 1500</div>
+                </div>
+            </div>
+
+            <!-- 獲得レリック一覧バッジ -->
+            <div class="active-relics-wrapper">
+                <span class="relic-label">獲得レリック:</span>
+                <div id="activeRelicsBar" class="active-relics-bar"></div>
+            </div>
+        </header>
+
+        <!-- メインゲームキャンバス -->
+        <div id="canvas-container">
+            <canvas id="gameCanvas" width="480" height="800"></canvas>
+        </div>
+
+        <!-- ボトムコントロールパネル -->
+        <footer id="control-panel">
+            <!-- マナゲージ -->
+            <div class="mana-container">
+                <div class="mana-icon">⚡</div>
+                <div class="mana-bar-outer">
+                    <div id="manaFill" class="mana-bar-fill"></div>
+                </div>
+                <div id="manaText" class="mana-text">60 / 200</div>
+            </div>
+
+            <!-- ボール出撃ボタントレイ -->
+            <div class="balls-tray">
+                <!-- 1: ピンポン玉 -->
+                <button class="ball-btn" data-type="pingpong" title="ピンポン玉 (キー: 1)">
+                    <div class="btn-hotkey">1</div>
+                    <div class="ball-icon icon-pingpong">🏓</div>
+                    <div class="btn-name">ピンポン</div>
+                    <div class="btn-cost">25 MP</div>
+                    <div class="cd-overlay"></div>
+                </button>
+
+                <!-- 2: 鉄球 -->
+                <button class="ball-btn" data-type="iron" title="鉄球 (キー: 2)">
+                    <div class="btn-hotkey">2</div>
+                    <div class="ball-icon icon-iron">⚙️</div>
+                    <div class="btn-name">鉄球</div>
+                    <div class="btn-cost">65 MP</div>
+                    <div class="cd-overlay"></div>
+                </button>
+
+                <!-- 3: トゲ玉 -->
+                <button class="ball-btn" data-type="spike" title="トゲ玉 (キー: 3)">
+                    <div class="btn-hotkey">3</div>
+                    <div class="ball-icon icon-spike">💥</div>
+                    <div class="btn-name">トゲ玉</div>
+                    <div class="btn-cost">55 MP</div>
+                    <div class="cd-overlay"></div>
+                </button>
+
+                <!-- 4: スーパーボール -->
+                <button class="ball-btn" data-type="super" title="スーパーボール (キー: 4)">
+                    <div class="btn-hotkey">4</div>
+                    <div class="ball-icon icon-super">🏀</div>
+                    <div class="btn-name">跳ね玉</div>
+                    <div class="btn-cost">75 MP</div>
+                    <div class="cd-overlay"></div>
+                </button>
+
+                <!-- 5: ボムボール -->
+                <button class="ball-btn" data-type="bomb" title="ボムボール (キー: 5)">
+                    <div class="btn-hotkey">5</div>
+                    <div class="ball-icon icon-bomb">💣</div>
+                    <div class="btn-name">ボム</div>
+                    <div class="btn-cost">105 MP</div>
+                    <div class="cd-overlay"></div>
+                </button>
+            </div>
+
+            <!-- エピック必殺技トレイ -->
+            <div class="skills-tray">
+                <button class="skill-btn" data-skill="giga_rock" title="大落石 ギガロック (キー: Q)">
+                    <div class="skill-hotkey">Q</div>
+                    <div class="skill-icon">🪨</div>
+                    <div class="skill-name">ギガロック</div>
+                    <div class="skill-cd-overlay"></div>
+                    <div class="skill-cd-text"></div>
+                </button>
+
+                <button class="skill-btn" data-skill="booster_slope" title="ブースター・スロープ (キー: W)">
+                    <div class="skill-hotkey">W</div>
+                    <div class="skill-icon">🌈</div>
+                    <div class="skill-name">ブースター</div>
+                    <div class="skill-cd-overlay"></div>
+                    <div class="skill-cd-text"></div>
+                </button>
+
+                <button class="skill-btn" data-skill="pinball_fever" title="ピンボール・フィーバー (キー: E)">
+                    <div class="skill-hotkey">E</div>
+                    <div class="skill-icon">⚡</div>
+                    <div class="skill-name">ピンボール</div>
+                    <div class="skill-cd-overlay"></div>
+                    <div class="skill-cd-text"></div>
+                </button>
+            </div>
+
+            <!-- デバッグ・検証用ツールバー -->
+            <div class="debug-toolbar">
+                <button id="btn-mana" class="debug-btn" title="無限マナ切り替え (キー: M)">無限マナ: OFF</button>
+                <button id="btn-speed" class="debug-btn" title="速度切り替え">速度: 1.0x</button>
+                <button id="btn-skip-boss" class="debug-btn" title="ボスWaveへ即時スキップ (キー: B)">ボス戦へ</button>
+                <button id="btn-toggle-stage" class="debug-btn" title="ステージ切り替え (キー: T)">Stage: 1</button>
+                <button id="btn-reset-skills" class="debug-btn" title="必殺技即時リチャージ (キー: C)">必殺技全快</button>
+                <button id="btn-relic-select" class="debug-btn" title="3択レリック即時オープン (キー: R)">レリック3択</button>
+            </div>
+        </footer>
+
+        <!-- 3択エピックレリック選択モーダル -->
+        <div id="relicModal" class="modal-backdrop hidden">
+            <div class="modal-content">
+                <h2 class="modal-title">✨ エピックレリック獲得 ✨</h2>
+                <p class="modal-subtitle">転がりをド派手に進化させる強化を1つ選んでください！</p>
+                <div id="relicCardsContainer" class="cards-grid">
+                    <!-- JavaScriptで動的生成 -->
+                </div>
+            </div>
+        </div>
+
+        <!-- 勝利モーダル -->
+        <div id="victoryModal" class="modal-backdrop hidden">
+            <div class="modal-content result-content win">
+                <div class="result-icon">👑</div>
+                <h2 class="result-title">VICTORY!!</h2>
+                <p class="result-desc">敵軍要塞を完全制圧しました！</p>
+                <button id="btn-retry-win" class="modal-btn">もう一度プレイ</button>
+            </div>
+        </div>
+
+        <!-- 敗北モーダル -->
+        <div id="defeatModal" class="modal-backdrop hidden">
+            <div class="modal-content result-content lose">
+                <div class="result-icon">💥</div>
+                <h2 class="result-title">DEFEATED...</h2>
+                <p class="result-desc">自陣ゲートが突破されました...</p>
+                <button id="btn-retry" class="modal-btn">リトライ</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ゲームスクリプト群（依存関係順） -->
+    <script src="src/audio.js"></script>
+    <script src="src/constants.js"></script>
+    <script src="src/effects.js"></script>
+    <script src="src/units.js"></script>
+    <script src="src/combat.js"></script>
+    <script src="src/skills.js"></script>
+    <script src="src/game.js"></script>
+</body>
+</html>
