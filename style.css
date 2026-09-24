@@ -1,0 +1,587 @@
+/* SakamichiTD - Sleek Cyber-Toy Stylesheet */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+body {
+    background-color: #0f1419;
+    color: #f1f2f6;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+#game-app {
+    width: 480px;
+    max-width: 100vw;
+    height: 100vh;
+    max-height: 980px;
+    background: #1e272e;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.8), 0 0 15px rgba(0, 210, 211, 0.2);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+/* ヘッダーHUD */
+#game-hud {
+    background: linear-gradient(180deg, #182026 0%, #1e272e 100%);
+    padding: 8px 12px;
+    border-bottom: 2px solid #2f3640;
+    z-index: 10;
+}
+
+.hud-bases {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.base-bar-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.base-label {
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+}
+
+.base-bar-container.ally .base-label {
+    color: #4bcffa;
+}
+
+.base-bar-container.enemy .base-label {
+    color: #ff5e57;
+    text-align: right;
+}
+
+.bar-outer {
+    height: 10px;
+    background: #000000;
+    border-radius: 5px;
+    overflow: hidden;
+    border: 1px solid #485460;
+}
+
+.bar-fill {
+    height: 100%;
+    width: 100%;
+    transition: width 0.15s ease-out;
+}
+
+.base-bar-container.ally .bar-fill {
+    background: linear-gradient(90deg, #0984e3, #00d2d3);
+}
+
+.base-bar-container.enemy .bar-fill {
+    background: linear-gradient(90deg, #d63031, #ff7675);
+}
+
+.bar-text {
+    font-size: 10px;
+    color: #d2dae2;
+    font-weight: 600;
+}
+
+.base-bar-container.enemy .bar-text {
+    text-align: right;
+}
+
+.header-badges {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+}
+
+.stage-badge {
+    background: #1e272e;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #00d2d3;
+    border: 1px solid #00a8ff;
+    white-space: nowrap;
+}
+
+.wave-badge {
+    background: #353b48;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: bold;
+    color: #fbc531;
+    border: 1px solid #718093;
+    white-space: nowrap;
+}
+
+/* 獲得レリック一覧 */
+.active-relics-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 11px;
+    color: #a4b0be;
+}
+
+.active-relics-bar {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+}
+
+.relic-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    background: #2f3640;
+    border-radius: 4px;
+    font-size: 13px;
+    border: 1px solid #f1c40f;
+    box-shadow: 0 0 5px rgba(241, 196, 15, 0.4);
+    cursor: help;
+}
+
+/* キャンバス領域 */
+#canvas-container {
+    flex: 1;
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: #111;
+    overflow: hidden;
+}
+
+#gameCanvas {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+/* フッター・操作トレイ */
+#control-panel {
+    background: #182026;
+    padding: 8px 10px 10px;
+    border-top: 2px solid #2f3640;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    z-index: 10;
+}
+
+/* マナバー */
+.mana-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.mana-icon {
+    font-size: 16px;
+    color: #00d2d3;
+    text-shadow: 0 0 8px #00d2d3;
+}
+
+.mana-bar-outer {
+    flex: 1;
+    height: 14px;
+    background: #000;
+    border-radius: 7px;
+    overflow: hidden;
+    border: 1px solid #00d2d3;
+    box-shadow: inset 0 0 6px rgba(0, 210, 211, 0.4);
+}
+
+.mana-bar-fill {
+    height: 100%;
+    width: 30%;
+    background: linear-gradient(90deg, #0984e3, #00d2d3, #55efc4);
+    box-shadow: 0 0 10px #00d2d3;
+    transition: width 0.08s linear;
+}
+
+.mana-text {
+    font-size: 11px;
+    font-weight: bold;
+    color: #55efc4;
+    min-width: 55px;
+    text-align: right;
+}
+
+/* ボール召喚ボタン */
+.balls-tray {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+}
+
+.ball-btn {
+    position: relative;
+    background: #2f3640;
+    border: 2px solid #718093;
+    border-radius: 8px;
+    padding: 6px 2px;
+    color: #f5f6fa;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    cursor: pointer;
+    overflow: hidden;
+    transition: transform 0.08s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.ball-btn:hover:not(.disabled) {
+    border-color: #00d2d3;
+    box-shadow: 0 0 10px rgba(0, 210, 211, 0.4);
+    transform: translateY(-2px);
+}
+
+.ball-btn:active:not(.disabled) {
+    transform: scale(0.95);
+}
+
+.ball-btn.disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    filter: grayscale(40%);
+}
+
+.btn-hotkey {
+    position: absolute;
+    top: 2px;
+    left: 4px;
+    font-size: 9px;
+    color: #a4b0be;
+    font-weight: bold;
+}
+
+.ball-icon {
+    font-size: 20px;
+    margin-top: 2px;
+}
+
+.btn-name {
+    font-size: 10px;
+    font-weight: bold;
+    margin-top: 2px;
+    white-space: nowrap;
+}
+
+.btn-cost {
+    font-size: 9px;
+    color: #55efc4;
+    font-weight: bold;
+    background: rgba(0, 0, 0, 0.4);
+    padding: 1px 4px;
+    border-radius: 3px;
+    margin-top: 2px;
+}
+
+.cd-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 0%;
+    background: rgba(0, 0, 0, 0.65);
+    pointer-events: none;
+    transition: height 0.05s linear;
+}
+
+/* 必殺技トレイ */
+.skills-tray {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+}
+
+.skill-btn {
+    position: relative;
+    background: linear-gradient(135deg, #2c3e50, #1e272e);
+    border: 2px solid #f1c40f;
+    border-radius: 8px;
+    padding: 6px 4px;
+    color: #f5f6fa;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    cursor: pointer;
+    overflow: hidden;
+    box-shadow: 0 0 8px rgba(241, 196, 15, 0.3);
+    transition: transform 0.08s, box-shadow 0.15s;
+}
+
+.skill-btn:hover:not(.on-cooldown) {
+    transform: translateY(-2px);
+    box-shadow: 0 0 14px rgba(241, 196, 15, 0.6);
+}
+
+.skill-btn.on-cooldown {
+    opacity: 0.6;
+    cursor: not-allowed;
+    border-color: #576574;
+    box-shadow: none;
+}
+
+.skill-hotkey {
+    background: #f1c40f;
+    color: #1e272e;
+    font-size: 10px;
+    font-weight: 900;
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+
+.skill-icon {
+    font-size: 16px;
+}
+
+.skill-name {
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.skill-cd-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 0%;
+    background: rgba(0, 0, 0, 0.7);
+    pointer-events: none;
+}
+
+.skill-cd-text {
+    position: absolute;
+    font-size: 11px;
+    font-weight: bold;
+    color: #ff7675;
+    text-shadow: 0 0 4px #000;
+}
+
+/* デバッグツールバー */
+.debug-toolbar {
+    display: flex;
+    gap: 4px;
+    justify-content: space-between;
+    margin-top: 4px;
+}
+
+.debug-btn {
+    flex: 1;
+    background: #2d3436;
+    border: 1px solid #485460;
+    color: #d2dae2;
+    font-size: 9px;
+    padding: 3px 2px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.debug-btn:hover {
+    background: #485460;
+}
+
+.debug-btn.active {
+    background: #e74c3c;
+    color: #ffffff;
+    border-color: #c0392b;
+    font-weight: bold;
+}
+
+/* モーダル */
+.modal-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(4px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+    animation: fadeIn 0.25s ease-out;
+}
+
+.modal-backdrop.hidden {
+    display: none;
+}
+
+.modal-content {
+    background: #182026;
+    border: 2px solid #f1c40f;
+    border-radius: 14px;
+    width: 90%;
+    padding: 18px 14px;
+    box-shadow: 0 0 30px rgba(241, 196, 15, 0.4);
+    text-align: center;
+}
+
+.modal-title {
+    font-size: 18px;
+    color: #f1c40f;
+    margin-bottom: 6px;
+    text-shadow: 0 0 10px rgba(241, 196, 15, 0.6);
+}
+
+.modal-subtitle {
+    font-size: 12px;
+    color: #d2dae2;
+    margin-bottom: 16px;
+}
+
+/* 3択カード */
+.cards-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.relic-card {
+    background: #2f3640;
+    border: 2px solid #718093;
+    border-radius: 10px;
+    padding: 12px;
+    cursor: pointer;
+    text-align: left;
+    position: relative;
+    transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.relic-card:hover {
+    transform: translateY(-3px) scale(1.02);
+}
+
+.relic-card.epic {
+    border-color: #9b59b6;
+    box-shadow: 0 0 12px rgba(155, 89, 182, 0.3);
+}
+
+.relic-card.epic:hover {
+    border-color: #e056fd;
+    box-shadow: 0 0 20px rgba(224, 86, 253, 0.6);
+}
+
+.relic-card.rare {
+    border-color: #3498db;
+    box-shadow: 0 0 12px rgba(52, 152, 219, 0.3);
+}
+
+.relic-card.rare:hover {
+    border-color: #00cec9;
+    box-shadow: 0 0 20px rgba(0, 206, 201, 0.6);
+}
+
+.card-badge {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    font-size: 9px;
+    font-weight: 900;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: #718093;
+    color: #fff;
+}
+
+.relic-card.epic .card-badge {
+    background: #8e44ad;
+}
+
+.relic-card.rare .card-badge {
+    background: #2980b9;
+}
+
+.card-icon {
+    font-size: 26px;
+    margin-bottom: 4px;
+}
+
+.card-title {
+    font-size: 15px;
+    font-weight: bold;
+    color: #f5f6fa;
+    margin-bottom: 4px;
+}
+
+.card-desc {
+    font-size: 12px;
+    color: #ced6e0;
+    line-height: 1.4;
+}
+
+/* リザルト画面 */
+.result-content {
+    padding: 28px 16px;
+}
+
+.result-icon {
+    font-size: 54px;
+    margin-bottom: 10px;
+}
+
+.result-title {
+    font-size: 26px;
+    margin-bottom: 8px;
+}
+
+.result-content.win .result-title {
+    color: #f1c40f;
+    text-shadow: 0 0 16px #f1c40f;
+}
+
+.result-content.lose .result-title {
+    color: #e74c3c;
+    text-shadow: 0 0 16px #e74c3c;
+}
+
+.result-desc {
+    font-size: 14px;
+    color: #d2dae2;
+    margin-bottom: 24px;
+}
+
+.modal-btn {
+    background: linear-gradient(135deg, #0984e3, #00d2d3);
+    color: #ffffff;
+    font-size: 15px;
+    font-weight: bold;
+    padding: 10px 24px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 0 12px rgba(0, 210, 211, 0.5);
+    transition: transform 0.1s;
+}
+
+.modal-btn:hover {
+    transform: scale(1.05);
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.96); }
+    to { opacity: 1; transform: scale(1); }
+}
