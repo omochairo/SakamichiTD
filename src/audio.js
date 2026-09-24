@@ -404,6 +404,28 @@ class SoundEngine {
         } catch (e) {}
     }
 
+    // 敗北時の悲しい下降音
+    playDefeat() {
+        if (!this.enabled || !this.ctx) return;
+        try {
+            const notes = [392.00, 349.23, 293.66, 220.00]; // G, F, D, A (下降)
+            notes.forEach((freq, idx) => {
+                const t = this.ctx.currentTime + idx * 0.18;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(freq, t);
+                osc.frequency.exponentialRampToValueAtTime(freq * 0.6, t + 0.4);
+                gain.gain.setValueAtTime(0.35 * this.volume, t);
+                gain.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(t);
+                osc.stop(t + 0.45);
+            });
+        } catch (e) {}
+    }
+
     // 警告アラートサイレン（巨大ボス登場時）
     playWarningSiren() {
         if (!this.enabled || !this.ctx) return;

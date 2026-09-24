@@ -175,20 +175,28 @@ class SkillManager {
     }
 
     getRandomRelicOptions(count = 3) {
-        const available = RELIC_POOL.filter(r => !this.activeRelics.some(ar => ar.id === r.id));
-        if (available.length === 0) return [];
+        let available = RELIC_POOL.filter(r => !this.activeRelics.some(ar => ar.id === r.id));
+        // 周回プレイ等で未取得レリックが尽きた場合は、全レリックから再抽選して
+        // 既存レリックを重ねがけできるようにする（強くてニューゲームでの選択肢切れ防止）
+        if (available.length === 0) available = RELIC_POOL;
         const shuffled = [...available].sort(() => 0.5 - Math.random());
         return shuffled.slice(0, Math.min(count, shuffled.length));
     }
 
     acquireRelic(relic) {
-        this.activeRelics.push(relic);
+        if (!this.activeRelics.some(ar => ar.id === relic.id)) {
+            this.activeRelics.push(relic);
+        }
         this.relicState[relic.id] = true;
         window.soundEngine.playUpgrade();
 
         if (relic.id === 'ink_overdrive') {
-            GAME_CONFIG.MANA_MAX += 60;
-            GAME_CONFIG.MANA_REGEN_BASE *= 1.5;
+            // GameManagerはコンストラクタでGAME_CONFIGの値をコピーして保持しているため、
+            // GAME_CONFIG側を書き換えても反映されない。インスタンス側を直接更新する。
+            if (window.gameManager) {
+                window.gameManager.maxMana += 60;
+                window.gameManager.manaRegen *= 1.5;
+            }
         } else if (relic.id === 'fortress_repair') {
             this.combatManager.allyBase.maxHp += 200;
             this.combatManager.allyBase.hp += 200;

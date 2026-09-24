@@ -130,6 +130,17 @@ body {
     white-space: nowrap;
 }
 
+.score-badge {
+    background: #1e272e;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #55efc4;
+    border: 1px solid #10ac84;
+    white-space: nowrap;
+}
+
 /* 獲得レリック一覧 */
 .active-relics-wrapper {
     display: flex;
@@ -561,7 +572,21 @@ body {
 .result-desc {
     font-size: 14px;
     color: #d2dae2;
-    margin-bottom: 24px;
+    margin-bottom: 12px;
+}
+
+.result-score {
+    font-size: 13px;
+    font-weight: bold;
+    color: #f1c40f;
+    margin-bottom: 20px;
+}
+
+.result-btn-row {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: center;
 }
 
 .modal-btn {
@@ -579,6 +604,11 @@ body {
 
 .modal-btn:hover {
     transform: scale(1.05);
+}
+
+.modal-btn.loop-btn {
+    background: linear-gradient(135deg, #8e44ad, #e056fd);
+    box-shadow: 0 0 12px rgba(224, 86, 253, 0.5);
 }
 
 @keyframes fadeIn {

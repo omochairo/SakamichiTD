@@ -11,6 +11,8 @@ class CombatManager {
         this.effectManager = null;
         this.relicState = {};
         this.coursePath = null;
+        this.comboCount = 0;
+        this.comboTimer = 0;
     }
 
     init(allyBase, enemyBase, effectManager, relicState, coursePath) {
@@ -41,14 +43,12 @@ class CombatManager {
         const totalLength = this.coursePath.totalLength;
 
         // 1. 同種ボール & 同種敵のマージ合体進化（スイカゲーム風）
+        // ※「マグネット吸着」レリックは合体判定距離を拡張する形で processMerges に統合済み。
+        //   以前は checkMagnetFusion という別系統のマージ処理が並走しており、
+        //   スケール上限の不一致(2.8 vs 2.5)や二重マージによるステータス暴走の原因になっていた。
         this.processMerges();
 
-        // 2. レリック: マグネット吸着の合体チェック
-        if (this.relicState.magnet_fusion) {
-            this.checkMagnetFusion();
-        }
-
-        // 3. 味方ユニットの前進・停止判定 & 前線重なり合い一斉攻撃
+        // 2. 味方ユニットの前進・停止判定 & 前線重なり合い一斉攻撃
         this.allies.sort((a, b) => b.s - a.s);
         this.enemies.sort((a, b) => a.s - b.s);
 
@@ -59,8 +59,9 @@ class CombatManager {
             let shouldStop = false;
 
             // ① 敵拠点到達判定 (s >= totalLength - 20)
-            if (ally.s + ally.radius >= totalLength - 10) {
-                ally.s = totalLength - 10 - ally.radius;
+            const allyEffRadius = ally.radius * ally.scaleMultiplier;
+            if (ally.s + allyEffRadius >= totalLength - 10) {
+                ally.s = totalLength - 10 - allyEffRadius;
                 shouldStop = true;
                 if (ally.attackTimer >= ally.attackInterval) {
                     ally.attackTimer = 0;
@@ -76,12 +77,17 @@ class CombatManager {
                 }
             }
 
-            // ② トゲ玉（SPIKE）の周囲スリップ切断
-            if (ally.config.id === 'spike' && ally.spikeTimer >= 0.2) {
+            // ② トゲ玉（SPIKE）の周囲スリップ切断（プラズマ・スパイク取得時はピンポン玉にも微細なトゲが付与される）
+            const isSpikeCapable = ally.config.id === 'spike' || (ally.config.id === 'pingpong' && this.relicState.sharp_spikes);
+            if (isSpikeCapable && ally.spikeTimer >= 0.2) {
                 ally.spikeTimer = 0;
+                const baseSpikeDps = ally.config.id === 'spike' ? ally.config.spikeDps : 6;
                 for (const e of this.enemies) {
-                    if (Math.abs(e.s - ally.s) <= (ally.radius * ally.scaleMultiplier + e.radius + 15)) {
-                        const spikeDmg = (ally.config.spikeDps * 0.2) * (this.relicState.sharp_spikes ? 2.0 : 1.0);
+                    const spikeReach = ally.radius * ally.scaleMultiplier + e.radius * e.scaleMultiplier + 15;
+                    if (Math.abs(e.s - ally.s) <= spikeReach) {
+                        // トゲ玉はゴーストに特効
+                        const ghostBonus = (e.isGhost && ally.config.id === 'spike') ? 1.5 : 1.0;
+                        const spikeDmg = (baseSpikeDps * 0.2) * (this.relicState.sharp_spikes ? 2.0 : 1.0) * ghostBonus;
                         e.takeDamage(spikeDmg);
                         this.effectManager.spawnImpactSparks(e.x, e.y, 3, '#e74c3c');
                         window.soundEngine.playSpikeHit();
@@ -99,7 +105,7 @@ class CombatManager {
 
             if (targetEnemy) {
                 const distS = targetEnemy.s - ally.s;
-                const contactDist = (ally.radius * ally.scaleMultiplier + targetEnemy.radius);
+                const contactDist = (ally.radius * ally.scaleMultiplier + targetEnemy.radius * targetEnemy.scaleMultiplier);
 
                 // ゴーストすり抜け判定
                 const canGhostPass = targetEnemy.isGhost && ally.config.id === 'pingpong';
@@ -116,8 +122,11 @@ class CombatManager {
                     // 【渋滞解消】前線にいる全味方が一斉に攻撃タイマーを回して攻撃！
                     if (ally.attackTimer >= ally.attackInterval) {
                         ally.attackTimer = 0;
-                        targetEnemy.takeDamage(ally.atk * ally.scaleMultiplier);
-                        this.effectManager.spawnDamageText(targetEnemy.x, targetEnemy.y, ally.atk * ally.scaleMultiplier);
+                        // トゲ玉・ボムボールはゴーストに特効
+                        const ghostBonus = (targetEnemy.isGhost && (ally.config.id === 'spike' || ally.config.id === 'bomb')) ? 1.5 : 1.0;
+                        const dmg = ally.atk * ally.scaleMultiplier * ghostBonus;
+                        targetEnemy.takeDamage(dmg);
+                        this.effectManager.spawnDamageText(targetEnemy.x, targetEnemy.y, dmg);
                         this.effectManager.spawnImpactSparks(targetEnemy.x, targetEnemy.y, 4);
                         window.soundEngine.playPoko();
                     }
@@ -138,7 +147,7 @@ class CombatManager {
             ally.isStopped = shouldStop;
         }
 
-        // 4. 敵ユニットの停止判定 & 攻撃サイクル（前線重なり合い一斉攻撃）
+        // 3. 敵ユニットの停止判定 & 攻撃サイクル（前線重なり合い一斉攻撃）
         const leadingAlly = this.allies.length > 0 ? this.allies[0] : null;
 
         for (let j = 0; j < this.enemies.length; j++) {
@@ -146,8 +155,9 @@ class CombatManager {
             let shouldStop = false;
 
             // ① 自陣ゲート到達判定 (s <= 15)
-            if (enemy.s - enemy.radius <= 15) {
-                enemy.s = 15 + enemy.radius;
+            const enemyEffRadius = enemy.radius * enemy.scaleMultiplier;
+            if (enemy.s - enemyEffRadius <= 15) {
+                enemy.s = 15 + enemyEffRadius;
                 shouldStop = true;
                 if (enemy.attackTimer >= enemy.attackInterval) {
                     enemy.attackTimer = 0;
@@ -161,7 +171,7 @@ class CombatManager {
             // ② 味方ボールとの交戦判定
             if (leadingAlly) {
                 const distS = enemy.s - leadingAlly.s;
-                const contactDist = (leadingAlly.radius * leadingAlly.scaleMultiplier + enemy.radius);
+                const contactDist = (leadingAlly.radius * leadingAlly.scaleMultiplier + enemy.radius * enemy.scaleMultiplier);
 
                 // スケルトン・アーチャー（遠距離射撃手）
                 if (enemy.isRanged) {
@@ -182,7 +192,7 @@ class CombatManager {
                     // 酸液自爆スライムの即時接触自爆！
                     if (enemy.isAcidSuicide) {
                         this.triggerAcidExplosion(enemy);
-                        break;
+                        continue;
                     }
 
                     if (enemy.attackTimer >= enemy.attackInterval) {
@@ -194,7 +204,7 @@ class CombatManager {
                             window.soundEngine.playCycloneWind();
                             this.effectManager.triggerShake(6, 0.2);
 
-                            const repelLimit = enemy.radius + 60;
+                            const repelLimit = enemy.radius * enemy.scaleMultiplier + 60;
                             for (const ally of this.allies) {
                                 if (Math.abs(ally.s - enemy.s) <= repelLimit) {
                                     ally.takeDamage(enemy.atk);
@@ -211,7 +221,7 @@ class CombatManager {
                             }
                         } else if (enemy.isAreaAttack) {
                             // ブルドーザー・ボスの前方範囲なぎ払い攻撃！（密集したボールを一網打尽）
-                            const areaLimit = enemy.radius + (enemy.config.areaRadius || 45);
+                            const areaLimit = enemy.radius * enemy.scaleMultiplier + (enemy.config.areaRadius || 45);
                             let hitCount = 0;
                             for (const ally of this.allies) {
                                 if (Math.abs(ally.s - enemy.s) <= areaLimit) {
@@ -240,11 +250,16 @@ class CombatManager {
                 }
             }
 
-            // タイタンボスの咆哮衝撃波（定期的に全前線を押し流す！）
+            // タイタンボスの咆哮衝撃波（定期的に全前線を押し流す！予備動作を挟んで回避のチャンスを与える）
             if (enemy.isTitan && enemy.roarInterval > 0) {
                 enemy.roarTimer += dt;
+                if (!enemy.roarTelegraphed && enemy.roarTimer >= enemy.roarInterval - 1.0) {
+                    enemy.roarTelegraphed = true;
+                    this.effectManager.spawnDamageText(enemy.x, enemy.y - 60, '⚠️ 咆哮の予備動作...', true, '#f1c40f');
+                }
                 if (enemy.roarTimer >= enemy.roarInterval) {
                     enemy.roarTimer = 0;
+                    enemy.roarTelegraphed = false;
                     this.effectManager.triggerShake(16, 0.45);
                     this.effectManager.spawnWindBlast(enemy.x, enemy.y);
                     this.effectManager.spawnDamageText(enemy.x, enemy.y - 45, '💥 咆哮衝破!!', true, '#e74c3c');
@@ -269,7 +284,7 @@ class CombatManager {
             if (!shouldStop && j > 0) {
                 const aheadEnemy = this.enemies[j - 1];
                 const distS = enemy.s - aheadEnemy.s;
-                const minSpacing = (enemy.radius + aheadEnemy.radius) * 0.35;
+                const minSpacing = (enemy.radius * enemy.scaleMultiplier + aheadEnemy.radius * aheadEnemy.scaleMultiplier) * 0.35;
                 if (distS <= minSpacing) {
                     shouldStop = true;
                 }
@@ -289,16 +304,32 @@ class CombatManager {
             enemy.update(dt);
         }
 
-        // 6. 死亡ユニットの処理
+        // 6. 死亡ユニットの処理（格に応じて撃破演出をスケール＆連続撃破コンボを表示）
+        if (this.comboTimer > 0) {
+            this.comboTimer -= dt;
+        } else {
+            this.comboCount = 0;
+        }
         for (const enemy of this.enemies) {
             if (!enemy.isAlive && !enemy.rewardGiven) {
                 enemy.rewardGiven = true;
                 if (window.gameManager) {
                     window.gameManager.addMana(enemy.manaReward);
+                    if (typeof window.gameManager.registerKill === 'function') {
+                        window.gameManager.registerKill();
+                    }
                 }
+
+                const tier = enemy.isTitan ? 3 : (enemy.isBoss ? 2 : (enemy.mergeLevel >= 2 ? 1 : 0));
                 this.effectManager.spawnDamageText(enemy.x, enemy.y, `+${enemy.manaReward} MP`, false, '#00d2d3');
-                this.effectManager.spawnImpactSparks(enemy.x, enemy.y, 14, '#2ecc71');
-                this.effectManager.triggerShake(4, 0.1);
+                this.effectManager.spawnImpactSparks(enemy.x, enemy.y, 14 + tier * 10, '#2ecc71');
+                this.effectManager.triggerShake(4 + tier * 3, 0.1 + tier * 0.05);
+
+                this.comboCount++;
+                this.comboTimer = 0.6;
+                if (this.comboCount >= 3) {
+                    this.effectManager.spawnDamageText(enemy.x, enemy.y - 30, `🔥 ${this.comboCount} COMBO!`, true, '#feca57');
+                }
             }
         }
         for (const ally of this.allies) {
@@ -340,6 +371,8 @@ class CombatManager {
         let critMultiplier = 2.0;
         if (isBoosterActive) critMultiplier *= 3.0;
         if (this.relicState.heavy_impact) critMultiplier *= 1.75;
+        // トゲ玉・ボムボールはゴーストに特効
+        if (enemy.isGhost && (ally.config.id === 'spike' || ally.config.id === 'bomb')) critMultiplier *= 1.5;
 
         let initialDamage = ally.atk * ally.scaleMultiplier * critMultiplier;
 
@@ -410,7 +443,7 @@ class CombatManager {
         for (let offset of [-20, 20]) {
             const mini = new Ball(
                 Math.max(0, Math.min(this.coursePath.totalLength, parentBall.s + offset)),
-                'pingpong',
+                'PINGPONG',
                 this.coursePath,
                 this.relicState
             );
@@ -434,8 +467,9 @@ class CombatManager {
                 if (!a2.isAlive || a2.mergeLevel >= 3 || a1.typeKey !== a2.typeKey || a1.mergeLevel !== a2.mergeLevel) continue;
 
                 const distS = Math.abs(a1.s - a2.s);
-                // 距離が近接したら合体！
-                if (distS <= 24) {
+                // 距離が近接したら合体！（マグネット吸着レリックで合体判定距離が拡張される）
+                const mergeReach = this.relicState.magnet_fusion ? 60 : 24;
+                if (distS <= mergeReach) {
                     a2.isAlive = false;
                     const success = a1.applyMerge(a2);
                     if (success) {
@@ -445,6 +479,16 @@ class CombatManager {
                         const label = a1.mergeLevel === 2 ? '★Lv.2 合体!!' : '★★MAX 巨大合体!!';
                         this.effectManager.spawnDamageText(a1.x, a1.y, label, true, sparkColor);
                         this.effectManager.triggerShake(5, 0.12);
+
+                        // レリック: 共鳴コア（合体の度にマナ回復＆周囲の攻撃タイマーを加速）
+                        if (this.relicState.resonance_core) {
+                            if (window.gameManager) window.gameManager.addMana(15);
+                            for (const other of this.allies) {
+                                if (other !== a1 && other.isAlive && Math.abs(other.s - a1.s) < 80) {
+                                    other.attackTimer = Math.min(other.attackInterval, other.attackTimer + other.attackInterval * 0.3);
+                                }
+                            }
+                        }
                     }
                     break;
                 }
@@ -470,35 +514,6 @@ class CombatManager {
                         this.effectManager.spawnDamageText(e1.x, e1.y, '★ELITE 合体!!', true, '#e74c3c');
                         this.effectManager.triggerShake(4, 0.1);
                     }
-                    break;
-                }
-            }
-        }
-    }
-
-    // マグネット合体
-    checkMagnetFusion() {
-        for (let i = 0; i < this.allies.length; i++) {
-            const a1 = this.allies[i];
-            if (!a1.isAlive || a1.isFused) continue;
-
-            for (let j = i + 1; j < this.allies.length; j++) {
-                const a2 = this.allies[j];
-                if (!a2.isAlive || a2.isFused || a1.typeKey !== a2.typeKey) continue;
-
-                const distS = Math.abs(a1.s - a2.s);
-                if (distS < (a1.radius + a2.radius) * 1.3) {
-                    a2.isAlive = false;
-                    a1.isFused = true;
-                    a1.scaleMultiplier = Math.min(2.5, a1.scaleMultiplier * 1.4);
-                    a1.hp += a2.hp;
-                    a1.maxHp += a2.maxHp;
-                    a1.atk = Math.round(a1.atk * 1.8);
-                    a1.pushPower += a2.pushPower;
-
-                    this.effectManager.spawnImpactSparks(a1.x, a1.y, 16, '#00cec9');
-                    this.effectManager.spawnDamageText(a1.x, a1.y, '合体強化!!', true, '#00d2d3');
-                    window.soundEngine.playUpgrade();
                     break;
                 }
             }
