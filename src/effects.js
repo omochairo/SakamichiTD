@@ -370,7 +370,8 @@ class EffectManager {
     render(ctx) {
         // パーティクル
         this.particles.forEach(p => {
-            const alpha = Math.max(0, p.life / p.maxLife);
+            // life の乱数上限が maxLife を超える粒子がある（火花 0.45 > 0.4 等）ため 1 で頭打ちにする
+            const alpha = Math.max(0, Math.min(1, p.life / p.maxLife));
             ctx.save();
             ctx.globalAlpha = alpha;
 

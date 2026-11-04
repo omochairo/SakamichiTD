@@ -7,28 +7,85 @@ class SoundEngine {
         this.ctx = null;
         this.enabled = true;
         this.volume = 0.5;
+
+        // 同時発音の上限（大乱闘時に発音ノードが際限なく積み上がり音割れ・負荷増になるのを防ぐ）
+        this.maxVoices = 32;
+        this.activeVoices = 0;
+        // 同じ効果音を同一瞬間に重ね鳴らししない最小間隔（秒）
+        this.minRetriggerInterval = 0.025;
+        this.lastPlayed = {};
     }
 
     init() {
         if (!this.ctx) {
             const AudioContextClass = window.AudioContext || window.webkitAudioContext;
             if (AudioContextClass) {
-                this.ctx = new AudioContextClass();
+                try {
+                    this.ctx = new AudioContextClass();
+                } catch (e) {
+                    console.warn('AudioContext init failed:', e);
+                    this.ctx = null;
+                }
             }
         }
-        if (this.ctx && this.ctx.state === 'suspended') {
-            this.ctx.resume();
+        this.resumeIfNeeded();
+    }
+
+    // suspended / interrupted（iOS Safari の割り込み・タブ復帰時）なら再開を試みる
+    resumeIfNeeded() {
+        if (!this.ctx || this.ctx.state === 'running' || this.ctx.state === 'closed') return;
+        try {
+            const p = this.ctx.resume();
+            if (p && typeof p.catch === 'function') p.catch(() => {});
+        } catch (e) {}
+    }
+
+    // 発音可否の判定（無効化・未初期化・同時発音上限・同一SEの連打を弾く）
+    canPlay(key) {
+        if (!this.enabled || !this.ctx) return false;
+        if (this.ctx.state !== 'running') {
+            this.resumeIfNeeded();
+            if (this.ctx.state !== 'running') return false;
         }
+        if (this.activeVoices >= this.maxVoices) return false;
+        const now = this.ctx.currentTime;
+        const last = this.lastPlayed[key];
+        if (last !== undefined && now - last < this.minRetriggerInterval) return false;
+        this.lastPlayed[key] = now;
+        return true;
+    }
+
+    // 発音ノードを生成し、終了時に同時発音数を戻す
+    trackVoice(node) {
+        // start() が成功した時だけ数える（途中で例外になったノードで数が戻らなくなるのを防ぐ）
+        const originalStart = node.start.bind(node);
+        node.start = (...args) => {
+            originalStart(...args);
+            this.activeVoices++;
+        };
+        node.onended = () => {
+            this.activeVoices = Math.max(0, this.activeVoices - 1);
+            node.disconnect();
+        };
+        return node;
+    }
+
+    createOsc() {
+        return this.trackVoice(this.ctx.createOscillator());
+    }
+
+    createSource() {
+        return this.trackVoice(this.ctx.createBufferSource());
     }
 
     // 基本のゴツン！激突音（初撃の重い手応え）
     playGotsun(intensity = 1.0) {
-        if (!this.enabled || !this.ctx) return;
+        if (!this.canPlay('playGotsun')) return;
         try {
             const t = this.ctx.currentTime;
             
             // 1. 低音インパクト (サブベースのキック)
-            const osc = this.ctx.createOscillator();
+            const osc = this.createOsc();
             const gain = this.ctx.createGain();
             osc.type = 'sine';
             
@@ -47,7 +104,7 @@ class SoundEngine {
             osc.stop(t + 0.18);
 
             // 2. 「カチッ」「ゴツン」のクリックアタック (高域のノック音)
-            const clickOsc = this.ctx.createOscillator();
+            const clickOsc = this.createOsc();
             const clickGain = this.ctx.createGain();
             clickOsc.type = 'triangle';
             clickOsc.frequency.setValueAtTime(600 * intensity, t);
@@ -68,12 +125,12 @@ class SoundEngine {
 
     // 鉄球のズッシリとした金属・重低音衝突音
     playIronImpact() {
-        if (!this.enabled || !this.ctx) return;
+        if (!this.canPlay('playIronImpact')) return;
         try {
             const t = this.ctx.currentTime;
             
             // 超低音
-            const osc1 = this.ctx.createOscillator();
+            const osc1 = this.createOsc();
             const gain1 = this.ctx.createGain();
             osc1.type = 'triangle';
             osc1.frequency.setValueAtTime(100, t);
@@ -86,7 +143,7 @@ class SoundEngine {
             osc1.stop(t + 0.3);
 
             // 金属クラング音
-            const osc2 = this.ctx.createOscillator();
+            const osc2 = this.createOsc();
             const gain2 = this.ctx.createGain();
             osc2.type = 'sawtooth';
             osc2.frequency.setValueAtTime(420, t);
@@ -102,10 +159,10 @@ class SoundEngine {
 
     // ピンポン玉の軽快なポコン音
     playPingPong() {
-        if (!this.enabled || !this.ctx) return;
+        if (!this.canPlay('playPingPong')) return;
         try {
             const t = this.ctx.currentTime;
-            const osc = this.ctx.createOscillator();
+            const osc = this.createOsc();
             const gain = this.ctx.createGain();
             osc.type = 'sine';
             osc.frequency.setValueAtTime(800 + Math.random() * 80, t);
@@ -123,10 +180,10 @@ class SoundEngine {
 
     // トゲ玉のジャキッという連続ダメージ音
     playSpikeHit() {
-        if (!this.enabled || !this.ctx) return;
+        if (!this.canPlay('playSpikeHit')) return;
         try {
             const t = this.ctx.currentTime;
-            const osc = this.ctx.createOscillator();
+            const osc = this.createOsc();
             const gain = this.ctx.createGain();
             osc.type = 'sawtooth';
             osc.frequency.setValueAtTime(500 + Math.random() * 200, t);
@@ -144,10 +201,10 @@ class SoundEngine {
 
     // スーパーボールのピョンピョン跳ねる音
     playBounce() {
-        if (!this.enabled || !this.ctx) return;
+        if (!this.canPlay('playBounce')) return;
         try {
             const t = this.ctx.currentTime;
-            const osc = this.ctx.createOscillator();
+            const osc = this.createOsc();
             const gain = this.ctx.createGain();
             osc.type = 'sine';
             osc.frequency.setValueAtTime(250, t);
@@ -165,7 +222,7 @@ class SoundEngine {
 
     // ボムボールの爆発音（大迫力ノイズ＋サブベース）
     playExplosion() {
-        if (!this.enabled || !this.ctx) return;
+        if (!this.canPlay('playExplosion')) return;
         try {
             const t = this.ctx.currentTime;
             const bufferSize = this.ctx.sampleRate * 0.4;
@@ -175,7 +232,7 @@ class SoundEngine {
                 data[i] = Math.random() * 2 - 1;
             }
 
-            const noise = this.ctx.createBufferSource();
+            const noise = this.createSource();
             noise.buffer = buffer;
 
             const filter = this.ctx.createBiquadFilter();
@@ -195,7 +252,7 @@ class SoundEngine {
             noise.stop(t + 0.4);
 
             // 爆発の芯となる重低音
-            const osc = this.ctx.createOscillator();
+            const osc = this.createOsc();
             const oscGain = this.ctx.createGain();
             osc.type = 'sine';
             osc.frequency.setValueAtTime(140, t);
@@ -212,10 +269,10 @@ class SoundEngine {
 
     // 必殺技: ギガロック（大落石の地響き）
     playBoulder() {
-        if (!this.enabled || !this.ctx) return;
+        if (!this.canPlay('playBoulder')) return;
         try {
             const t = this.ctx.currentTime;
-            const osc = this.ctx.createOscillator();
+            const osc = this.createOsc();
             const gain = this.ctx.createGain();
             osc.type = 'sawtooth';
             osc.frequency.setValueAtTime(60, t);
@@ -239,10 +296,10 @@ class SoundEngine {
 
     // 必殺技: ブースタースロープ起動音
     playBooster() {
-        if (!this.enabled || !this.ctx) return;
+        if (!this.canPlay('playBooster')) return;
         try {
             const t = this.ctx.currentTime;
-            const osc = this.ctx.createOscillator();
+            const osc = this.createOsc();
             const gain = this.ctx.createGain();
             osc.type = 'sine';
             osc.frequency.setValueAtTime(260, t);
@@ -260,10 +317,10 @@ class SoundEngine {
 
     // 必殺技: ピンボールフィーバーのバンパーヒット音
     playPinball(pitch = 1.0) {
-        if (!this.enabled || !this.ctx) return;
+        if (!this.canPlay('playPinball')) return;
         try {
             const t = this.ctx.currentTime;
-            const osc = this.ctx.createOscillator();
+            const osc = this.createOsc();
             const gain = this.ctx.createGain();
             osc.type = 'sine';
             osc.frequency.setValueAtTime(900 * pitch, t);
@@ -281,10 +338,10 @@ class SoundEngine {
 
     // 通常ポコポコ攻撃音
     playPoko() {
-        if (!this.enabled || !this.ctx) return;
+        if (!this.canPlay('playPoko')) return;
         try {
             const t = this.ctx.currentTime;
-            const osc = this.ctx.createOscillator();
+            const osc = this.createOsc();
             const gain = this.ctx.createGain();
             osc.type = 'sine';
             osc.frequency.setValueAtTime(300 + Math.random() * 80, t);
@@ -302,10 +359,10 @@ class SoundEngine {
 
     // ボール出撃音
     playSpawn() {
-        if (!this.enabled || !this.ctx) return;
+        if (!this.canPlay('playSpawn')) return;
         try {
             const t = this.ctx.currentTime;
-            const osc = this.ctx.createOscillator();
+            const osc = this.createOsc();
             const gain = this.ctx.createGain();
             osc.type = 'sine';
             osc.frequency.setValueAtTime(200, t);
@@ -323,12 +380,12 @@ class SoundEngine {
 
     // カード選択・レリック獲得キラキラ音
     playUpgrade() {
-        if (!this.enabled || !this.ctx) return;
+        if (!this.canPlay('playUpgrade')) return;
         try {
             const notes = [523.25, 659.25, 783.99, 1046.50]; // C, E, G, High C
             notes.forEach((freq, idx) => {
                 const t = this.ctx.currentTime + idx * 0.06;
-                const osc = this.ctx.createOscillator();
+                const osc = this.createOsc();
                 const gain = this.ctx.createGain();
                 osc.type = 'sine';
                 osc.frequency.setValueAtTime(freq, t);
@@ -344,7 +401,7 @@ class SoundEngine {
 
     // 同種ボール・敵のマージ合体音（スイカゲーム風の気持ちいいチャイム＋ポヨン音）
     playMergeSound(level = 2) {
-        if (!this.enabled || !this.ctx) return;
+        if (!this.canPlay('playMergeSound')) return;
         try {
             const t = this.ctx.currentTime;
             const baseFreq = level === 2 ? 587.33 : 880.00; // D5 または A5
@@ -352,7 +409,7 @@ class SoundEngine {
 
             notes.forEach((freq, idx) => {
                 const noteT = t + idx * 0.045;
-                const osc = this.ctx.createOscillator();
+                const osc = this.createOsc();
                 const gain = this.ctx.createGain();
                 osc.type = 'sine';
                 osc.frequency.setValueAtTime(freq * 0.8, noteT);
@@ -369,7 +426,7 @@ class SoundEngine {
             });
 
             // ポヨンッとした低音レゾナンス
-            const bassOsc = this.ctx.createOscillator();
+            const bassOsc = this.createOsc();
             const bassGain = this.ctx.createGain();
             bassOsc.type = 'triangle';
             bassOsc.frequency.setValueAtTime(160, t);
@@ -385,12 +442,12 @@ class SoundEngine {
 
     // 勝利ファンファーレ
     playVictory() {
-        if (!this.enabled || !this.ctx) return;
+        if (!this.canPlay('playVictory')) return;
         try {
             const notes = [440, 554.37, 659.25, 880];
             notes.forEach((freq, idx) => {
                 const t = this.ctx.currentTime + idx * 0.12;
-                const osc = this.ctx.createOscillator();
+                const osc = this.createOsc();
                 const gain = this.ctx.createGain();
                 osc.type = 'triangle';
                 osc.frequency.setValueAtTime(freq, t);
@@ -406,12 +463,12 @@ class SoundEngine {
 
     // 敗北時の悲しい下降音
     playDefeat() {
-        if (!this.enabled || !this.ctx) return;
+        if (!this.canPlay('playDefeat')) return;
         try {
             const notes = [392.00, 349.23, 293.66, 220.00]; // G, F, D, A (下降)
             notes.forEach((freq, idx) => {
                 const t = this.ctx.currentTime + idx * 0.18;
-                const osc = this.ctx.createOscillator();
+                const osc = this.createOsc();
                 const gain = this.ctx.createGain();
                 osc.type = 'sawtooth';
                 osc.frequency.setValueAtTime(freq, t);
@@ -428,12 +485,12 @@ class SoundEngine {
 
     // 警告アラートサイレン（巨大ボス登場時）
     playWarningSiren() {
-        if (!this.enabled || !this.ctx) return;
+        if (!this.canPlay('playWarningSiren')) return;
         try {
             const t = this.ctx.currentTime;
             for (let i = 0; i < 2; i++) {
                 const startT = t + i * 0.35;
-                const osc = this.ctx.createOscillator();
+                const osc = this.createOsc();
                 const gain = this.ctx.createGain();
                 osc.type = 'sawtooth';
                 osc.frequency.setValueAtTime(450, startT);
@@ -453,10 +510,10 @@ class SoundEngine {
 
     // 突風吹き飛ばし音（サイクロン攻撃）
     playCycloneWind() {
-        if (!this.enabled || !this.ctx) return;
+        if (!this.canPlay('playCycloneWind')) return;
         try {
             const t = this.ctx.currentTime;
-            const osc = this.ctx.createOscillator();
+            const osc = this.createOsc();
             const gain = this.ctx.createGain();
             osc.type = 'sine';
             osc.frequency.setValueAtTime(120, t);
