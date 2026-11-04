@@ -19,6 +19,8 @@ class CombatManager {
         this.coursePath = null;
         this.comboCount = 0;
         this.comboTimer = 0;
+        // 味方ループの最中に生まれた子玉（分裂セル）。ループ後にまとめて加える
+        this.pendingAllies = [];
     }
 
     init(allyBase, enemyBase, effectManager, relicState, coursePath) {
@@ -64,6 +66,12 @@ class CombatManager {
             const ally = this.allies[i];
             let shouldStop = false;
 
+            // このフレームの合体で消えた味方は行動させない
+            if (!ally.isAlive) {
+                ally.isStopped = false;
+                continue;
+            }
+
             // ① 敵拠点到達判定 (s >= totalLength - 20)
             const allyEffRadius = ally.radius * ally.scaleMultiplier;
             if (ally.s + allyEffRadius >= totalLength - 10) {
@@ -107,13 +115,16 @@ class CombatManager {
             // ピンポン玉はゴーストをすり抜けるので、ゴーストを飛ばして後ろの最初の実体敵を狙う
             // （以前は先頭がゴーストだとその後ろの敵軍全体まですり抜けていた）。
             // スーパーボールの場合は後衛のアーチャー（または最奥の敵）を狙う
+            // 対象はこの味方より前方（すれ違って後ろへ抜けた敵は除く）の敵に限る。
+            // 先頭の敵だけを見ると、その敵とすれ違った後に手前の別の敵を素通りしてしまうため。
             const passesGhost = ally.config.id === 'pingpong';
-            let targetEnemy = this.enemies.find(e => e.isAlive && !(passesGhost && e.isGhost)) || null;
+            const isAhead = (e) => e.s - ally.s >= -(ally.radius * ally.scaleMultiplier + e.radius * e.scaleMultiplier);
+            let targetEnemy = this.enemies.find(e => e.isAlive && isAhead(e) && !(passesGhost && e.isGhost)) || null;
             if (ally.config.id === 'super') {
-                const aliveEnemies = this.enemies.filter(e => e.isAlive);
-                if (aliveEnemies.length > 1) {
-                    const archer = aliveEnemies.find(e => e.isRanged);
-                    targetEnemy = archer || aliveEnemies[aliveEnemies.length - 1];
+                const aheadEnemies = this.enemies.filter(e => e.isAlive && isAhead(e));
+                if (aheadEnemies.length > 1) {
+                    const archer = aheadEnemies.find(e => e.isRanged);
+                    targetEnemy = archer || aheadEnemies[aheadEnemies.length - 1];
                 }
             }
 
@@ -145,7 +156,9 @@ class CombatManager {
             }
 
             // ④ 味方同士の隊列（前線への滑り込み重なり合いを大幅に許容）
-            if (!shouldStop && i > 0) {
+            // スーパーボールは前線を飛び越えて後衛を狙うので、前の味方に詰まって止まらない
+            // （止まると狙う敵に届かないまま攻撃もせず棒立ちになる）
+            if (!shouldStop && i > 0 && ally.config.id !== 'super') {
                 const aheadAlly = this.allies[i - 1];
                 const distS = aheadAlly.s - ally.s;
                 // 最小間隔を半径の35%まで詰め込み、団子状に重なることを許可
@@ -156,6 +169,13 @@ class CombatManager {
             }
 
             ally.isStopped = shouldStop;
+        }
+
+        // 分裂セルの子玉はループ後に加え、s 順に並べ直してから敵側の判定に進む
+        if (this.pendingAllies.length > 0) {
+            this.allies.push(...this.pendingAllies);
+            this.pendingAllies = [];
+            this.allies.sort((a, b) => b.s - a.s);
         }
 
         // 3. 敵ユニットの停止判定 & 攻撃サイクル（前線重なり合い一斉攻撃）
@@ -169,8 +189,15 @@ class CombatManager {
                 continue;
             }
 
-            // 先頭の生存味方（前の敵の攻撃で倒れた味方を叩き続けないよう毎回探す）
-            const leadingAlly = this.allies.find(a => a.isAlive) || null;
+            // この敵の前方（坂の上側）で最も近い生存味方。allies は s の降順なので、
+            // すれ違って後ろへ抜けた味方（スーパーボール等）を飛ばした最初の 1 体になる。
+            // 倒れた味方を叩き続けないよう毎回探す。
+            // ゴーストとピンポン玉は互いにすり抜ける（味方側でピンポン玉がゴーストを無視するのと対にする）
+            const leadingAlly = this.allies.find(a =>
+                a.isAlive &&
+                !(enemy.isGhost && a.config.id === 'pingpong') &&
+                enemy.s - a.s >= -(a.radius * a.scaleMultiplier + enemy.radius * enemy.scaleMultiplier)
+            ) || null;
 
             // ① 自陣ゲート到達判定 (s <= 15)
             const enemyEffRadius = enemy.radius * enemy.scaleMultiplier;
@@ -286,7 +313,7 @@ class CombatManager {
 
                     const blastRange = enemy.radius + 120;
                     for (const ally of this.allies) {
-                        if (Math.abs(ally.s - enemy.s) <= blastRange) {
+                        if (ally.isAlive && Math.abs(ally.s - enemy.s) <= blastRange) {
                             if (ally.config.immuneKnockback) {
                                 this.effectManager.spawnDamageText(ally.x, ally.y, 'GUARD!', false, '#7f8c8d');
                             } else {
@@ -344,9 +371,7 @@ class CombatManager {
                 enemy.rewardGiven = true;
                 if (window.gameManager) {
                     window.gameManager.addMana(enemy.manaReward);
-                    if (typeof window.gameManager.registerKill === 'function') {
-                        window.gameManager.registerKill();
-                    }
+                    window.gameManager.registerKill(enemy);
                 }
 
                 const tier = enemy.isTitan ? 3 : (enemy.isBoss ? 2 : (enemy.mergeLevel >= 2 ? 1 : 0));
@@ -364,8 +389,12 @@ class CombatManager {
     }
 
     // 酸液自爆スライムの爆発
+    // 仕様: 自爆は「味方ボールに接触したとき」だけ起きる。接触前に倒せば自爆させずに処理できる
+    // （README の「遠距離からボムボールで先制爆破」）。倒されたときの死に際の自爆は無い。
+    // 自爆はプレイヤーが倒したわけではないので、撃破報酬（マナ・スコア・コンボ）は与えない。
     triggerAcidExplosion(slime) {
         slime.isAlive = false;
+        slime.rewardGiven = true;
         const blastRadius = slime.config.suicideRadius || 75;
         this.effectManager.spawnExplosion(slime.x, slime.y, blastRadius);
         window.soundEngine.playExplosion();
@@ -466,6 +495,8 @@ class CombatManager {
     // 分裂セル
     triggerSplitCell(parentBall) {
         for (let offset of [-20, 20]) {
+            // 味方ボールの上限を超えて子玉を増やさない
+            if (this.allies.length + this.pendingAllies.length >= GAME_CONFIG.MAX_ALLIES) break;
             const mini = new Ball(
                 Math.max(0, Math.min(this.coursePath.totalLength, parentBall.s + offset)),
                 'PINGPONG',
@@ -477,7 +508,7 @@ class CombatManager {
             mini.recomputeDerivedStats();
             mini.isSplitChild = true;
             mini.isFirstHit = true;
-            this.allies.push(mini);
+            this.pendingAllies.push(mini);
         }
         window.soundEngine.playPingPong();
     }
@@ -566,9 +597,10 @@ class CombatManager {
         if (allyPushPower === 0 || enemyPushPower === 0) return;
 
         const powerDiff = allyPushPower - enemyPushPower;
-        // 【バグ修正】急激なワープ・超猛スピード加速を防止するため、押し合い速度を最大±35px/sにクランプ
-        const rawSpeed = powerDiff * 6; // パワー差1あたり6px/s
-        const clampedSpeed = Math.max(-35, Math.min(35, rawSpeed));
+        // 【バグ修正】急激なワープ・超猛スピード加速を防止するため、押し合い速度を上限でクランプ
+        const rawSpeed = powerDiff * GAME_CONFIG.PUSH_SPEED_FACTOR;
+        const cap = GAME_CONFIG.PUSH_SPEED_CAP;
+        const clampedSpeed = Math.max(-cap, Math.min(cap, rawSpeed));
         const pushDelta = clampedSpeed * dt;
 
         if (Math.abs(pushDelta) > 0.001) {
@@ -595,6 +627,7 @@ class CombatManager {
             this.effectManager.spawnDamageText(ally.x, ally.y, '消滅!!', true, '#e74c3c');
         }
         this.allies = [];
+        this.pendingAllies = [];
     }
 
     render(ctx) {

@@ -1,6 +1,9 @@
 /**
  * SakamichiTD - Skills & Relics Manager (一本道ジグザグコース対応)
  */
+// ピンボール・フィーバーで 1 つのバンパーが発動する最小間隔（秒）。1 回の発動で周囲の敵に 36 ダメージ
+const PINBALL_HIT_INTERVAL = 0.2;
+
 class SkillManager {
     constructor() {
         this.cooldowns = {
@@ -81,7 +84,10 @@ class SkillManager {
             radius: 38,
             speed: 520,
             rotation: 0,
-            damage: 320
+            damage: 320,
+            // 巻き込んだ敵ごとの未表示ダメージ。毎フレーム出すと表示が溢れるので一定間隔でまとめて出す
+            pendingDamage: new Map(),
+            textTimer: 0
         };
         this.effectManager.triggerShake(10, 0.6);
         window.soundEngine.playBoulder();
@@ -106,27 +112,45 @@ class SkillManager {
             this.effectManager.spawnImpactSparks(rock.x, rock.y, 3, '#7f8c8d');
         }
 
-        // 道中の敵を全員巻き込んで下へ押し流す
+        // 道中の敵を全員巻き込んで下へ押し流す（岩が前面に押し出し続けるのでノックバックは掛けない）
         for (const enemy of this.combatManager.enemies) {
+            if (!enemy.isAlive) continue;
             const distS = enemy.s - rock.s;
             if (Math.abs(distS) < rock.radius + enemy.radius + 15) {
                 // 敵を岩の前面に押し出す
-                enemy.s = rock.s + rock.radius + enemy.radius;
+                enemy.s = Math.min(this.coursePath.totalLength, rock.s + rock.radius + enemy.radius);
                 enemy.updateCoordinates();
-                enemy.takeDamage(rock.damage * dt * 4.5);
-                enemy.applyKnockback(50);
-                this.effectManager.spawnDamageText(enemy.x, enemy.y, 45, true, '#d35400');
+                const dmg = rock.damage * dt * 4.5;
+                enemy.takeDamage(dmg);
+                rock.pendingDamage.set(enemy, (rock.pendingDamage.get(enemy) || 0) + dmg);
             }
+        }
+
+        rock.textTimer += dt;
+        if (rock.textTimer >= 0.25) {
+            rock.textTimer = 0;
+            this.flushGigaRockDamageTexts(rock);
         }
 
         // 敵拠点に激突
         if (rock.s >= this.coursePath.totalLength - 10) {
+            this.flushGigaRockDamageTexts(rock);
             this.combatManager.enemyBase.takeDamage(380);
             this.effectManager.spawnExplosion(this.coursePath.enemyBase.x, this.coursePath.enemyBase.y, 110);
             this.effectManager.triggerShake(16, 0.45);
             window.soundEngine.playExplosion();
             this.activeGigaRock = null;
         }
+    }
+
+    // 前回表示してから溜まった実ダメージを、敵ごとに 1 つの数字で出す
+    flushGigaRockDamageTexts(rock) {
+        for (const [enemy, amount] of rock.pendingDamage) {
+            if (amount >= 1) {
+                this.effectManager.spawnDamageText(enemy.x, enemy.y, amount, true, '#d35400');
+            }
+        }
+        rock.pendingDamage.clear();
     }
 
     // 2. ブースター・スロープ
@@ -143,24 +167,33 @@ class SkillManager {
     // 3. ピンボール・フィーバー
     activatePinballFever() {
         this.pinballTimer = 12.0;
-        this.effectManager.setupBumpers();
+        this.effectManager.setupBumpers(this.coursePath);
         this.effectManager.triggerShake(6, 0.25);
         window.soundEngine.playPinball(1.2);
     }
 
     updatePinballCollisions(dt) {
         const bumpers = this.effectManager.bumpers;
+        for (const b of bumpers) {
+            if (b.hitCooldown > 0) b.hitCooldown -= dt;
+        }
         for (const ally of this.combatManager.allies) {
+            if (!ally.isAlive) continue;
             for (const b of bumpers) {
+                // 1 つのバンパーは PINBALL_HIT_INTERVAL 秒に 1 回だけ発動する
+                // （重なっている間ずっと毎フレーム当たると、ダメージがフレームレートに比例してしまう）
+                if (b.hitCooldown > 0) continue;
                 const dist = Math.hypot(ally.x - b.x, ally.y - b.y);
                 const minDist = ally.radius * ally.scaleMultiplier + b.radius;
                 if (dist < minDist) {
+                    b.hitCooldown = PINBALL_HIT_INTERVAL;
                     b.flashTimer = 0.15;
                     this.effectManager.triggerShake(4, 0.08);
                     window.soundEngine.playPinball(1.0 + Math.random() * 0.4);
 
                     // 敵にタコ殴りダメージ
                     for (const enemy of this.combatManager.enemies) {
+                        if (!enemy.isAlive) continue;
                         const enemyDist = Math.hypot(enemy.x - b.x, enemy.y - b.y);
                         if (enemyDist < b.radius * 3.0) {
                             enemy.takeDamage(36);
@@ -174,19 +207,25 @@ class SkillManager {
         }
     }
 
+    // 仕様: レリックは各 1 回だけ取得でき、重ねがけはしない。
+    // 周回で全種類を取り終えたら空配列を返し、Wave クリア時の 3 択は出さずに次の Wave へ進む。
+    // （以前は全種類から再抽選していたが、取り直して効果が重なるのは ink_overdrive と
+    //  fortress_repair だけで、他は何も起きない選択肢になっていた）
     getRandomRelicOptions(count = 3) {
-        let available = RELIC_POOL.filter(r => !this.activeRelics.some(ar => ar.id === r.id));
-        // 周回プレイ等で未取得レリックが尽きた場合は、全レリックから再抽選して
-        // 既存レリックを重ねがけできるようにする（強くてニューゲームでの選択肢切れ防止）
-        if (available.length === 0) available = RELIC_POOL;
-        const shuffled = [...available].sort(() => 0.5 - Math.random());
+        const available = RELIC_POOL.filter(r => !this.activeRelics.some(ar => ar.id === r.id));
+        // Fisher-Yates（sort に乱数を渡す方法は偏るため）
+        const shuffled = [...available];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
         return shuffled.slice(0, Math.min(count, shuffled.length));
     }
 
     acquireRelic(relic) {
-        if (!this.activeRelics.some(ar => ar.id === relic.id)) {
-            this.activeRelics.push(relic);
-        }
+        // 取得済みのレリックは効果を重ねない
+        if (this.activeRelics.some(ar => ar.id === relic.id)) return;
+        this.activeRelics.push(relic);
         this.relicState[relic.id] = true;
         window.soundEngine.playUpgrade();
 

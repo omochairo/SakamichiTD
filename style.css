@@ -413,6 +413,22 @@ body {
     cursor: pointer;
 }
 
+.volume-control {
+    flex: 1.4;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: #d2dae2;
+    font-size: 9px;
+}
+
+.volume-control input[type="range"] {
+    flex: 1;
+    min-width: 0;
+    height: 14px;
+    accent-color: #00cec9;
+}
+
 .debug-btn:hover {
     background: #485460;
 }

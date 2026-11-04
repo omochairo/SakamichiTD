@@ -222,15 +222,21 @@ const GAME_CONFIG = {
     CANVAS_WIDTH: 480,
     CANVAS_HEIGHT: 800,
     
-    GRAVITY_ACCEL: 45,     // 坂道の下り加速度 (px/s^2)
-    MAX_SPEED_CAP: 340,    // 坂道での最大下り速度
-    
-    PUSH_SPEED_FACTOR: 14, // 押し合いパワー差1あたりの前線移動速度 (px/s)
+    GRAVITY_ACCEL: 112.5,  // 坂道の下り加速度 (px/s^2)。最高速は各ボールの maxSpeed で頭打ち
+
+    PUSH_SPEED_FACTOR: 6,  // 押し合いパワー差1あたりの前線移動速度 (px/s)
+    PUSH_SPEED_CAP: 35,    // 押し合いによる前線移動速度の上限 (±px/s)
     KNOCKBACK_DISTANCE: 32,// 初撃激突時のノックバック量 (px)
-    
+    KNOCKBACK_DECAY: 0.04, // ノックバック速度の 1 秒あたりの残存率（小さいほど短時間で止まる）
+
+    MAX_ALLIES: 60,        // 場に出せる味方ボールの上限（分裂セルの子玉を含む）
+
     MANA_MAX: 200,
     MANA_REGEN_BASE: 14,   // 毎秒回復量
 };
+
+// ノックバックの初速 = 距離 × KNOCKBACK_RATE（指数減衰の総移動量が距離ちょうどになる係数）
+const KNOCKBACK_RATE = -Math.log(GAME_CONFIG.KNOCKBACK_DECAY);
 
 // 味方ボールユニットの定義
 const BALL_TYPES = {
@@ -252,7 +258,6 @@ const BALL_TYPES = {
         role: '壁役・時間稼ぎ',
         desc: '安価で連打可能。軽量の足止め壁役。耐久力は低く単体では倒されやすい。',
         spinMultiplier: 1.6,
-        canKnockback: true,
         immuneKnockback: false,
     },
     IRON: {
@@ -273,7 +278,6 @@ const BALL_TYPES = {
         role: '高耐久タンク',
         desc: '重厚な回転と重低音。高HPで敵の攻撃によるノックバックを無効化。ブルドーザー対策に必須。',
         spinMultiplier: 0.8,
-        canKnockback: true,
         immuneKnockback: true,
     },
     SPIKE: {
@@ -294,7 +298,6 @@ const BALL_TYPES = {
         role: '持続アタッカー',
         desc: 'トゲを高速回転させ突撃。接触中の敵に0.2秒ごとに継続切断ダメージ。ゴーストや集団に特効。',
         spinMultiplier: 1.3,
-        canKnockback: true,
         immuneKnockback: false,
         spikeDps: 22,
     },
@@ -316,9 +319,7 @@ const BALL_TYPES = {
         role: '後衛狙撃アタッカー',
         desc: '坂をピョンピョン跳ねながら突進。前線を飛び越えて後衛のアーチャーを直接強襲・撃破する。',
         spinMultiplier: 1.2,
-        canKnockback: true,
         immuneKnockback: false,
-        jumpRange: 120,
     },
     BOMB: {
         id: 'bomb',
@@ -338,7 +339,6 @@ const BALL_TYPES = {
         role: '自爆・範囲殲滅',
         desc: '導火線がパチパチ光りながら転がる。激突時に大爆発しブルドーザーや密集敵を一網打尽。',
         spinMultiplier: 1.0,
-        canKnockback: true,
         immuneKnockback: false,
         isBomb: true,
         explosionRadius: 95,
@@ -443,7 +443,6 @@ const RELIC_POOL = [
 // 敵ユニットタイプ（多彩なバリエーションとアンチ特性）
 const ENEMY_TYPES = {
     GOBLIN: {
-        id: 'goblin',
         name: 'ゴブリン歩兵',
         hp: 65,
         atk: 10,
@@ -457,7 +456,6 @@ const ENEMY_TYPES = {
         immuneKnockback: false,
     },
     SHIELD: {
-        id: 'shield',
         name: '重装シールド兵',
         hp: 290,
         atk: 15,
@@ -472,7 +470,6 @@ const ENEMY_TYPES = {
         shieldGuard: 0.5,      // 初撃激突ダメージ50%カット
     },
     WOLF: {
-        id: 'wolf',
         name: 'スピードウルフ',
         hp: 55,
         atk: 18,
@@ -486,7 +483,6 @@ const ENEMY_TYPES = {
         immuneKnockback: false,
     },
     BULLDOZER: {
-        id: 'bulldozer',
         name: '重装ブルドーザー',
         hp: 380,
         atk: 25,
@@ -502,7 +498,6 @@ const ENEMY_TYPES = {
         areaRadius: 40,
     },
     ARCHER: {
-        id: 'archer',
         name: 'スケルトン・アーチャー',
         hp: 50,
         atk: 16,
@@ -518,7 +513,6 @@ const ENEMY_TYPES = {
         attackRange: 130,
     },
     ACID_SLIME: {
-        id: 'acid_slime',
         name: '酸液自爆スライム',
         hp: 45,
         atk: 60,
@@ -534,7 +528,6 @@ const ENEMY_TYPES = {
         suicideRadius: 75,
     },
     GHOST: {
-        id: 'ghost',
         name: 'シャドウ・ゴースト',
         hp: 95,
         atk: 14,
@@ -549,7 +542,6 @@ const ENEMY_TYPES = {
         immuneKnockback: true,
     },
     TORNADO_GOLEM: {
-        id: 'tornado_golem',
         name: 'トルネード・ゴーレム',
         hp: 260,
         atk: 20,
@@ -565,7 +557,6 @@ const ENEMY_TYPES = {
         repelForce: 120,       // 接触した味方ボールを坂の上へ120px弾き飛ばす！
     },
     GOLEM_BOSS: {
-        id: 'golem_boss',
         name: 'アイアンゴーレム (BOSS)',
         hp: 1250,
         atk: 45,
@@ -582,7 +573,6 @@ const ENEMY_TYPES = {
         areaRadius: 50,
     },
     TITAN_GOLEM: {
-        id: 'titan_boss',
         name: '超巨神 タイタン (SUPER BOSS)',
         hp: 5200,                // 高耐久化：集中攻撃でも瞬殺されない重厚感
         atk: 65,

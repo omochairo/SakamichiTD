@@ -19,7 +19,8 @@ class BaseUnit {
         this.isAlive = true;
 
         this.rotation = 0; // 自転角度 (rad)
-        this.knockbackS = 0; // ノックバックによる s オフセット
+        // ノックバック速度（s 方向・px/s）。見た目のオフセットではなく s そのものを動かすので、
+        // 吹き飛ばされたユニットは実際に後退し、交戦・押し合いの判定もその位置で行われる
         this.knockbackVelocity = 0;
 
         // 初期座標の同期
@@ -27,8 +28,7 @@ class BaseUnit {
     }
 
     updateCoordinates() {
-        const effectiveS = Math.max(0, Math.min(this.coursePath.totalLength, this.s + this.knockbackS));
-        const pt = this.coursePath.getPointAt(effectiveS);
+        const pt = this.coursePath.getPointAt(this.s);
         this.x = pt.x;
         this.y = pt.y;
         this.tx = pt.tx;
@@ -46,18 +46,25 @@ class BaseUnit {
         }
     }
 
-    applyKnockback(strength) {
-        this.knockbackVelocity = strength;
+    // distance: 吹き飛ばす距離 (px)。正で s 増加方向（敵要塞側）、負で s 減少方向（自陣ゲート側＝坂の上）。
+    // 速度は KNOCKBACK_DECAY で指数減衰し、合計の移動量がちょうど distance になるよう初速を決める。
+    // 同じ向きに吹き飛んでいる最中は強い方を残す（大技の後退中に小攻撃で急停止しないように）。
+    // 逆向きの力を受けたら新しい方で置き換える。
+    applyKnockback(distance) {
+        const v = distance * KNOCKBACK_RATE;
+        if (Math.sign(v) !== Math.sign(this.knockbackVelocity) || Math.abs(v) > Math.abs(this.knockbackVelocity)) {
+            this.knockbackVelocity = v;
+        }
     }
 
     updateKnockback(dt) {
-        if (this.knockbackVelocity !== 0 || this.knockbackS !== 0) {
-            this.knockbackS += this.knockbackVelocity * dt;
-            this.knockbackVelocity *= Math.pow(0.04, dt);
-            this.knockbackS *= Math.pow(0.08, dt);
-            if (Math.abs(this.knockbackS) < 0.5) this.knockbackS = 0;
-            if (Math.abs(this.knockbackVelocity) < 1) this.knockbackVelocity = 0;
-        }
+        if (this.knockbackVelocity === 0 || dt <= 0) return;
+        // v(t) = v0 * DECAY^t を厳密に積分する（フレームレートによらず同じ距離だけ動く）
+        const decayFactor = Math.pow(GAME_CONFIG.KNOCKBACK_DECAY, dt);
+        const deltaS = this.knockbackVelocity * (1 - decayFactor) / KNOCKBACK_RATE;
+        this.s = Math.max(0, Math.min(this.coursePath.totalLength, this.s + deltaS));
+        this.knockbackVelocity *= decayFactor;
+        if (Math.abs(this.knockbackVelocity) < 1) this.knockbackVelocity = 0;
     }
 }
 
@@ -149,6 +156,12 @@ class Ball extends BaseUnit {
         return true;
     }
 
+    // 坂の上へ押し戻されたボールは勢いを失い、初速から転がり直す
+    applyKnockback(distance) {
+        super.applyKnockback(distance);
+        if (distance < 0) this.currentSpeed = Math.min(this.currentSpeed, this.baseSpeed);
+    }
+
     update(dt, effectManager, isBoosterActive = false) {
         this.updateKnockback(dt);
 
@@ -163,7 +176,7 @@ class Ball extends BaseUnit {
             // 坂道による加速 (擬似重力)
             this.currentSpeed = Math.min(
                 this.maxSpeed,
-                this.currentSpeed + GAME_CONFIG.GRAVITY_ACCEL * dt * 2.5
+                this.currentSpeed + GAME_CONFIG.GRAVITY_ACCEL * dt
             );
 
             const effectiveSpeed = this.currentSpeed * speedMult;
@@ -505,7 +518,8 @@ class Enemy extends BaseUnit {
 
             // 敵も坂を登る方向（進行方向逆）に自転
             const spinDir = this.tx >= 0 ? -1 : 1;
-            this.rotation += spinDir * (deltaS / this.radius) * 0.8;
+            // ★ELITE で巨大化した分だけ回転は遅くなる（見た目の半径で割る）
+            this.rotation += spinDir * (deltaS / (this.radius * this.scaleMultiplier)) * 0.8;
         } else {
             this.attackTimer += dt;
         }

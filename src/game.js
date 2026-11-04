@@ -1,6 +1,28 @@
 /**
  * SakamichiTD - Main Game Controller (手描きスケッチ準拠 ジグザグ板スロープ版)
  */
+
+// localStorage はプライベートモード・ファイル直開き・ストレージ無効の環境で例外を投げることがある。
+// 保存できなくてもゲームは続けられるよう、読み書きの失敗は握りつぶす
+const safeStorage = {
+    get(key) {
+        try {
+            return window.localStorage.getItem(key);
+        } catch (e) {
+            return null;
+        }
+    },
+    set(key, value) {
+        try {
+            window.localStorage.setItem(key, value);
+        } catch (e) {}
+    }
+};
+
+// 撃破 1 体あたりのスコア = 撃破時のマナ報酬 × この倍率
+// （エリート合体・周回の補正が乗った manaReward を使うので、強い敵ほど高い）
+const SCORE_PER_MANA_REWARD = 5;
+
 class GameManager {
     constructor() {
         this.canvas = null;
@@ -47,18 +69,107 @@ class GameManager {
         // 強くてニューゲーム（周回）＆ スコア
         this.loopCount = 0;
         this.score = 0;
-        this.bestScore = Number(localStorage.getItem('sakamichiTD_bestScore') || 0);
+        this.bestScore = Number(safeStorage.get('sakamichiTD_bestScore')) || 0;
     }
 
     addScore(amount) {
         this.score += Math.round(amount);
     }
 
+    // 敵 1 体を倒したとき（CombatManager.rewardDeadEnemies から 1 体につき 1 回呼ばれる）
+    registerKill(enemy) {
+        this.addScore((enemy?.manaReward || 0) * SCORE_PER_MANA_REWARD);
+    }
+
     saveBestScoreIfNeeded() {
         if (this.score > this.bestScore) {
             this.bestScore = this.score;
-            localStorage.setItem('sakamichiTD_bestScore', String(this.bestScore));
+            safeStorage.set('sakamichiTD_bestScore', String(this.bestScore));
         }
+    }
+
+    // 出撃・必殺技を受け付ける状態か（一時停止中・レリック3択中・勝敗確定後は受け付けない）
+    canAct() {
+        return !this.isPaused && !this.relicModalOpen && !this.isGameOver && !this.isVictory;
+    }
+
+    useSkill(skillId) {
+        if (!this.canAct()) return false;
+        return this.skillManager.triggerSkill(skillId);
+    }
+
+    togglePause() {
+        if (this.relicModalOpen || this.isGameOver || this.isVictory) return;
+        this.isPaused = !this.isPaused;
+        this.updatePauseUI();
+    }
+
+    updatePauseUI() {
+        const pauseBtn = document.getElementById('btn-pause');
+        if (pauseBtn) {
+            pauseBtn.textContent = this.isPaused && !this.relicModalOpen ? '▶ 再開' : '⏸ 一時停止';
+            pauseBtn.classList.toggle('active', this.isPaused && !this.relicModalOpen);
+        }
+    }
+
+    // 音のミュート・音量（設定は保存して次回も引き継ぐ）
+    loadSoundSettings() {
+        const savedVolume = Number(safeStorage.get('sakamichiTD_volume'));
+        if (safeStorage.get('sakamichiTD_volume') !== null && Number.isFinite(savedVolume)) {
+            window.soundEngine.setVolume(savedVolume);
+        }
+        if (safeStorage.get('sakamichiTD_muted') === '1') {
+            window.soundEngine.setEnabled(false);
+        }
+        this.updateSoundUI();
+    }
+
+    toggleMute() {
+        window.soundEngine.setEnabled(!window.soundEngine.enabled);
+        safeStorage.set('sakamichiTD_muted', window.soundEngine.enabled ? '0' : '1');
+        this.updateSoundUI();
+    }
+
+    setVolume(volume) {
+        window.soundEngine.setVolume(volume);
+        safeStorage.set('sakamichiTD_volume', String(window.soundEngine.volume));
+        // 音量を上げる操作はミュート解除の意思とみなす
+        if (!window.soundEngine.enabled && window.soundEngine.volume > 0) {
+            window.soundEngine.setEnabled(true);
+            safeStorage.set('sakamichiTD_muted', '0');
+        }
+        this.updateSoundUI();
+    }
+
+    updateSoundUI() {
+        const muteBtn = document.getElementById('btn-mute');
+        if (muteBtn) {
+            muteBtn.textContent = window.soundEngine.enabled ? '🔊 音: ON' : '🔇 音: OFF';
+            muteBtn.classList.toggle('active', !window.soundEngine.enabled);
+        }
+        const slider = document.getElementById('volumeSlider');
+        if (slider) slider.value = String(Math.round(window.soundEngine.volume * 100));
+    }
+
+    // ボタンの説明・コストを定数（BALL_TYPES / SPECIAL_SKILLS）から作る（HTML 直書きとの食い違いを防ぐ）
+    populateControlLabels() {
+        document.querySelectorAll('.ball-btn').forEach(btn => {
+            const config = BALL_TYPES[btn.dataset.type.toUpperCase()];
+            if (!config) return;
+            const hotkey = btn.querySelector('.btn-hotkey')?.textContent?.trim();
+            btn.title = `${config.name}【${config.role}】${config.cost} MP${hotkey ? ` (キー: ${hotkey})` : ''}\n${config.desc}`;
+            const costEl = btn.querySelector('.btn-cost');
+            if (costEl) costEl.textContent = `${config.cost} MP`;
+        });
+        document.querySelectorAll('.skill-btn').forEach(btn => {
+            const config = SPECIAL_SKILLS[btn.dataset.skill.toUpperCase()];
+            if (!config) return;
+            btn.title = `${config.icon} ${config.name} (キー: ${config.key})\n${config.desc}`;
+            const keyEl = btn.querySelector('.skill-hotkey');
+            if (keyEl) keyEl.textContent = config.key;
+            const iconEl = btn.querySelector('.skill-icon');
+            if (iconEl) iconEl.textContent = config.icon;
+        });
     }
 
     finalizeVictory() {
@@ -130,7 +241,10 @@ class GameManager {
         this.combatManager.init(this.allyBase, this.enemyBase, this.effectManager, this.relicState, this.coursePath);
         this.skillManager.init(this.combatManager, this.effectManager, this.relicState, this.coursePath);
 
+        this.populateControlLabels();
+        this.loadSoundSettings();
         this.bindEvents();
+        this.updatePauseUI();
         this.startWave(1);
 
         this.lastTime = performance.now();
@@ -158,8 +272,26 @@ class GameManager {
         document.querySelectorAll('.skill-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const skillId = btn.dataset.skill;
-                this.skillManager.triggerSkill(skillId);
+                this.useSkill(skillId);
             });
+        });
+
+        // 一時停止ボタン（キーボードの無いスマホでも止められるように）
+        document.getElementById('btn-pause')?.addEventListener('click', () => {
+            this.togglePause();
+        });
+
+        // 一時停止中の画面をタップしても再開できる
+        this.canvas.addEventListener('click', () => {
+            if (this.isPaused && !this.relicModalOpen) this.togglePause();
+        });
+
+        // 音のミュート・音量
+        document.getElementById('btn-mute')?.addEventListener('click', () => {
+            this.toggleMute();
+        });
+        document.getElementById('volumeSlider')?.addEventListener('input', (e) => {
+            this.setVolume(Number(e.target.value) / 100);
         });
 
         // デバッグツールボタン
@@ -211,9 +343,10 @@ class GameManager {
             else if (e.key === '3') this.spawnBall('spike');
             else if (e.key === '4') this.spawnBall('super');
             else if (e.key === '5') this.spawnBall('bomb');
-            else if (e.key.toLowerCase() === 'q') this.skillManager.triggerSkill('giga_rock');
-            else if (e.key.toLowerCase() === 'w') this.skillManager.triggerSkill('booster_slope');
-            else if (e.key.toLowerCase() === 'e') this.skillManager.triggerSkill('pinball_fever');
+            else if (e.key.toLowerCase() === 'q') this.useSkill('giga_rock');
+            else if (e.key.toLowerCase() === 'w') this.useSkill('booster_slope');
+            else if (e.key.toLowerCase() === 'e') this.useSkill('pinball_fever');
+            else if (e.key.toLowerCase() === 'n') this.toggleMute();
             else if (e.key.toLowerCase() === 'm') {
                 this.infiniteMana = !this.infiniteMana;
                 if (this.infiniteMana) this.mana = this.maxMana;
@@ -227,7 +360,7 @@ class GameManager {
             } else if (e.key.toLowerCase() === 'b') {
                 this.skipToBossWave();
             } else if (e.code === 'Space') {
-                this.isPaused = !this.isPaused;
+                this.togglePause();
             }
         });
 
@@ -268,6 +401,7 @@ class GameManager {
 
         this.combatManager.setCoursePath(this.coursePath);
         this.skillManager.setCoursePath(this.coursePath);
+        this.effectManager.relayoutBumpers(this.coursePath);
 
         // 既存ユニットの位置補正（コース総延長比でsを再スケールしてから再投影する）
         this.combatManager.allies.forEach(a => {
@@ -305,12 +439,18 @@ class GameManager {
 
     // 右上自陣ゲート（s=0）からボールを出撃
     spawnBall(typeKey) {
-        if (this.isGameOver || this.isVictory) return;
+        if (!this.canAct()) return;
         const config = BALL_TYPES[typeKey.toUpperCase()];
         if (!config) return;
 
         if (this.ballCooldowns[typeKey] > 0) return;
         if (!this.infiniteMana && this.mana < config.cost) return;
+
+        // 場のボールが上限に達していたら出撃しない（マナもクールダウンも消費しない）
+        if (this.combatManager.allies.length >= GAME_CONFIG.MAX_ALLIES) {
+            this.effectManager.spawnDamageText(this.allyBase.x, this.allyBase.y + 30, '満員!', false, '#feca57');
+            return;
+        }
 
         if (!this.infiniteMana) {
             this.mana -= config.cost;
@@ -478,12 +618,17 @@ class GameManager {
         container.innerHTML = '';
 
         if (options.length === 0) {
+            // 全レリック取得済み（重ねがけはしない仕様）。3 択は出さずにそのまま進める
+            this.effectManager.spawnDamageText(GAME_CONFIG.CANVAS_WIDTH / 2, GAME_CONFIG.CANVAS_HEIGHT * 0.4, '✨ レリック コンプリート！', true, '#feca57');
             if (callbackOnSelect) callbackOnSelect();
             return;
         }
 
+        // 一時停止中に開いた（デバッグの R）なら、選んだ後も一時停止のままにする
+        const wasPaused = this.isPaused;
         this.relicModalOpen = true;
         this.isPaused = true;
+        this.updatePauseUI();
 
         options.forEach(relic => {
             const card = document.createElement('div');
@@ -495,10 +640,13 @@ class GameManager {
                 <div class="card-desc">${relic.desc}</div>
             `;
             card.addEventListener('click', () => {
+                // 連打・同時タップで 2 枚目が処理され、Wave が多重に進むのを防ぐ
+                if (!this.relicModalOpen) return;
                 this.skillManager.acquireRelic(relic);
                 modal.classList.add('hidden');
                 this.relicModalOpen = false;
-                this.isPaused = false;
+                this.isPaused = wasPaused;
+                this.updatePauseUI();
                 this.renderActiveRelicsUI();
                 if (callbackOnSelect) callbackOnSelect();
             });
@@ -665,6 +813,29 @@ class GameManager {
             ctx.restore();
         }
 
+        ctx.restore();
+
+        // 8. 画面全体に掛かる帯・暗転は揺れの外で描く
+        this.effectManager.renderOverlays(ctx);
+
+        // 9. 一時停止中の表示（レリック3択中はモーダルが出ているので出さない）
+        if (this.isPaused && !this.relicModalOpen && !this.isGameOver && !this.isVictory) {
+            this.renderPauseOverlay(ctx, w, h);
+        }
+    }
+
+    renderPauseOverlay(ctx, w, h) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.fillRect(0, 0, w, h);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 30px "Arial Black", sans-serif';
+        ctx.fillText('⏸ 一時停止中', w / 2, h * 0.45);
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillStyle = '#d2dae2';
+        ctx.fillText('Space キー・画面タップ・「再開」ボタンで再開', w / 2, h * 0.45 + 36);
         ctx.restore();
     }
 
