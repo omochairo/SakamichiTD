@@ -2,6 +2,12 @@
  * SakamichiTD - Combat & Line Battle Manager (一本道コース対応・安定化設計)
  * コース上の1次元進行距離 s による完全安定ラインバトルロジック
  */
+// 攻撃タイマーの消費。0 に戻すと超過分が捨てられ、dt が大きいほど（低FPS・2x/3x速）
+// 実効攻撃間隔が延びてしまうため、超過分を持ち越す。剰余を取るので、停止中に溜まった分で連続攻撃はしない。
+function consumeAttackTimer(timer, interval) {
+    return interval > 0 ? (timer - interval) % interval : 0;
+}
+
 class CombatManager {
     constructor() {
         this.allies = [];
@@ -37,6 +43,8 @@ class CombatManager {
     }
 
     update(dt, isBoosterActive = false) {
+        // 前フレームの後半（必殺技など）で倒された敵は、取り除く前に報酬を確定させる
+        this.rewardDeadEnemies();
         this.allies = this.allies.filter(a => a.isAlive);
         this.enemies = this.enemies.filter(e => e.isAlive);
 
@@ -52,8 +60,6 @@ class CombatManager {
         this.allies.sort((a, b) => b.s - a.s);
         this.enemies.sort((a, b) => a.s - b.s);
 
-        const leadingEnemy = this.enemies.length > 0 ? this.enemies[0] : null;
-
         for (let i = 0; i < this.allies.length; i++) {
             const ally = this.allies[i];
             let shouldStop = false;
@@ -64,7 +70,7 @@ class CombatManager {
                 ally.s = totalLength - 10 - allyEffRadius;
                 shouldStop = true;
                 if (ally.attackTimer >= ally.attackInterval) {
-                    ally.attackTimer = 0;
+                    ally.attackTimer = consumeAttackTimer(ally.attackTimer, ally.attackInterval);
                     if (this.enemyBase.hasBarrier) {
                         this.effectManager.spawnDamageText(this.enemyBase.x, this.enemyBase.y - 25, '🛡️ BARRIER', false, '#00cec9');
                         this.effectManager.spawnImpactSparks(this.enemyBase.x, this.enemyBase.y - 10, 4, '#81ecec');
@@ -80,9 +86,10 @@ class CombatManager {
             // ② トゲ玉（SPIKE）の周囲スリップ切断（プラズマ・スパイク取得時はピンポン玉にも微細なトゲが付与される）
             const isSpikeCapable = ally.config.id === 'spike' || (ally.config.id === 'pingpong' && this.relicState.sharp_spikes);
             if (isSpikeCapable && ally.spikeTimer >= 0.2) {
-                ally.spikeTimer = 0;
+                ally.spikeTimer = consumeAttackTimer(ally.spikeTimer, 0.2);
                 const baseSpikeDps = ally.config.id === 'spike' ? ally.config.spikeDps : 6;
                 for (const e of this.enemies) {
+                    if (!e.isAlive) continue;
                     const spikeReach = ally.radius * ally.scaleMultiplier + e.radius * e.scaleMultiplier + 15;
                     if (Math.abs(e.s - ally.s) <= spikeReach) {
                         // トゲ玉はゴーストに特効
@@ -96,22 +103,26 @@ class CombatManager {
             }
 
             // ③ 敵ユニットとの接触 & 前線重なり合い全員攻撃
+            // 狙うのは先頭の「生存している」敵（この周回中に倒された敵を叩き続けないよう毎回探す）。
+            // ピンポン玉はゴーストをすり抜けるので、ゴーストを飛ばして後ろの最初の実体敵を狙う
+            // （以前は先頭がゴーストだとその後ろの敵軍全体まですり抜けていた）。
             // スーパーボールの場合は後衛のアーチャー（または最奥の敵）を狙う
-            let targetEnemy = leadingEnemy;
-            if (ally.config.id === 'super' && this.enemies.length > 1) {
-                const archer = this.enemies.find(e => e.isRanged && e.isAlive);
-                targetEnemy = archer || this.enemies[this.enemies.length - 1];
+            const passesGhost = ally.config.id === 'pingpong';
+            let targetEnemy = this.enemies.find(e => e.isAlive && !(passesGhost && e.isGhost)) || null;
+            if (ally.config.id === 'super') {
+                const aliveEnemies = this.enemies.filter(e => e.isAlive);
+                if (aliveEnemies.length > 1) {
+                    const archer = aliveEnemies.find(e => e.isRanged);
+                    targetEnemy = archer || aliveEnemies[aliveEnemies.length - 1];
+                }
             }
 
             if (targetEnemy) {
                 const distS = targetEnemy.s - ally.s;
                 const contactDist = (ally.radius * ally.scaleMultiplier + targetEnemy.radius * targetEnemy.scaleMultiplier);
 
-                // ゴーストすり抜け判定
-                const canGhostPass = targetEnemy.isGhost && ally.config.id === 'pingpong';
-
                 // 前線接触距離または前線至近（75px以内）に追いついた味方は全員攻撃に参加！
-                if (!canGhostPass && distS <= contactDist + 75 && distS >= -contactDist) {
+                if (distS <= contactDist + 75 && distS >= -contactDist) {
                     shouldStop = true;
 
                     // 初撃（激突ボーナス）
@@ -121,7 +132,7 @@ class CombatManager {
 
                     // 【渋滞解消】前線にいる全味方が一斉に攻撃タイマーを回して攻撃！
                     if (ally.attackTimer >= ally.attackInterval) {
-                        ally.attackTimer = 0;
+                        ally.attackTimer = consumeAttackTimer(ally.attackTimer, ally.attackInterval);
                         // トゲ玉・ボムボールはゴーストに特効
                         const ghostBonus = (targetEnemy.isGhost && (ally.config.id === 'spike' || ally.config.id === 'bomb')) ? 1.5 : 1.0;
                         const dmg = ally.atk * ally.scaleMultiplier * ghostBonus;
@@ -148,11 +159,18 @@ class CombatManager {
         }
 
         // 3. 敵ユニットの停止判定 & 攻撃サイクル（前線重なり合い一斉攻撃）
-        const leadingAlly = this.allies.length > 0 ? this.allies[0] : null;
-
         for (let j = 0; j < this.enemies.length; j++) {
             const enemy = this.enemies[j];
             let shouldStop = false;
+
+            // この周回中に倒された敵は攻撃・咆哮・押し合いに参加させない
+            if (!enemy.isAlive) {
+                enemy.isStopped = false;
+                continue;
+            }
+
+            // 先頭の生存味方（前の敵の攻撃で倒れた味方を叩き続けないよう毎回探す）
+            const leadingAlly = this.allies.find(a => a.isAlive) || null;
 
             // ① 自陣ゲート到達判定 (s <= 15)
             const enemyEffRadius = enemy.radius * enemy.scaleMultiplier;
@@ -160,7 +178,7 @@ class CombatManager {
                 enemy.s = 15 + enemyEffRadius;
                 shouldStop = true;
                 if (enemy.attackTimer >= enemy.attackInterval) {
-                    enemy.attackTimer = 0;
+                    enemy.attackTimer = consumeAttackTimer(enemy.attackTimer, enemy.attackInterval);
                     this.allyBase.takeDamage(enemy.atk);
                     this.effectManager.spawnDamageText(this.allyBase.x, this.allyBase.y + 15, enemy.atk, false, '#3498db');
                     this.effectManager.triggerShake(5, 0.15);
@@ -178,7 +196,7 @@ class CombatManager {
                     if (distS <= enemy.attackRange) {
                         shouldStop = true;
                         if (enemy.attackTimer >= enemy.attackInterval) {
-                            enemy.attackTimer = 0;
+                            enemy.attackTimer = consumeAttackTimer(enemy.attackTimer, enemy.attackInterval);
                             leadingAlly.takeDamage(enemy.atk);
                             this.effectManager.spawnDamageText(leadingAlly.x, leadingAlly.y, enemy.atk, false, '#ecf0f1');
                             this.effectManager.spawnImpactSparks(leadingAlly.x, leadingAlly.y, 4, '#bdc3c7');
@@ -196,7 +214,7 @@ class CombatManager {
                     }
 
                     if (enemy.attackTimer >= enemy.attackInterval) {
-                        enemy.attackTimer = 0;
+                        enemy.attackTimer = consumeAttackTimer(enemy.attackTimer, enemy.attackInterval);
 
                         if (enemy.isTornado) {
                             // 【新機能】トルネード・ゴーレムの突風吹き飛ばし攻撃！
@@ -206,7 +224,7 @@ class CombatManager {
 
                             const repelLimit = enemy.radius * enemy.scaleMultiplier + 60;
                             for (const ally of this.allies) {
-                                if (Math.abs(ally.s - enemy.s) <= repelLimit) {
+                                if (ally.isAlive && Math.abs(ally.s - enemy.s) <= repelLimit) {
                                     ally.takeDamage(enemy.atk);
                                     if (ally.config.immuneKnockback) {
                                         this.effectManager.spawnDamageText(ally.x, ally.y, 'GUARD!', false, '#7f8c8d');
@@ -224,7 +242,7 @@ class CombatManager {
                             const areaLimit = enemy.radius * enemy.scaleMultiplier + (enemy.config.areaRadius || 45);
                             let hitCount = 0;
                             for (const ally of this.allies) {
-                                if (Math.abs(ally.s - enemy.s) <= areaLimit) {
+                                if (ally.isAlive && Math.abs(ally.s - enemy.s) <= areaLimit) {
                                     ally.takeDamage(enemy.atk);
                                     this.effectManager.spawnDamageText(ally.x, ally.y, enemy.atk, true, '#e74c3c');
                                     this.effectManager.spawnImpactSparks(ally.x, ally.y, 5, '#e74c3c');
@@ -310,6 +328,17 @@ class CombatManager {
         } else {
             this.comboCount = 0;
         }
+        this.rewardDeadEnemies();
+        for (const ally of this.allies) {
+            if (!ally.isAlive && !ally.effectTriggered) {
+                ally.effectTriggered = true;
+                this.effectManager.spawnImpactSparks(ally.x, ally.y, 8, '#747d8c');
+            }
+        }
+    }
+
+    // 倒れた敵の報酬（マナ・撃破数・コンボ）を 1 体につき 1 回だけ与える
+    rewardDeadEnemies() {
         for (const enemy of this.enemies) {
             if (!enemy.isAlive && !enemy.rewardGiven) {
                 enemy.rewardGiven = true;
@@ -330,12 +359,6 @@ class CombatManager {
                 if (this.comboCount >= 3) {
                     this.effectManager.spawnDamageText(enemy.x, enemy.y - 30, `🔥 ${this.comboCount} COMBO!`, true, '#feca57');
                 }
-            }
-        }
-        for (const ally of this.allies) {
-            if (!ally.isAlive && !ally.effectTriggered) {
-                ally.effectTriggered = true;
-                this.effectManager.spawnImpactSparks(ally.x, ally.y, 8, '#747d8c');
             }
         }
     }
@@ -423,11 +446,13 @@ class CombatManager {
     // ボムボール爆発
     triggerBombExplosion(bomb) {
         bomb.isAlive = false;
-        const blastRadius = bomb.config.explosionRadius;
+        // マージで拡張された爆発範囲はボール個体が持つ（共有設定 BALL_TYPES は書き換えない）
+        const blastRadius = bomb.explosionRadius || bomb.config.explosionRadius;
         this.effectManager.spawnExplosion(bomb.x, bomb.y, blastRadius);
         window.soundEngine.playExplosion();
 
         for (const enemy of this.enemies) {
+            if (!enemy.isAlive) continue;
             const dist = Math.hypot(enemy.x - bomb.x, enemy.y - bomb.y);
             if (dist <= blastRadius) {
                 const dmg = bomb.atk * (1 - dist / (blastRadius * 1.3));
@@ -447,7 +472,9 @@ class CombatManager {
                 this.coursePath,
                 this.relicState
             );
-            mini.scaleMultiplier = 0.75;
+            // scaleMultiplier は recomputeDerivedStats() で再計算されるため、元になる mergeScale 側で縮める
+            mini.mergeScale = 0.75;
+            mini.recomputeDerivedStats();
             mini.isSplitChild = true;
             mini.isFirstHit = true;
             this.allies.push(mini);
@@ -471,6 +498,7 @@ class CombatManager {
                 const mergeReach = this.relicState.magnet_fusion ? 60 : 24;
                 if (distS <= mergeReach) {
                     a2.isAlive = false;
+                    a2.effectTriggered = true; // 合体で消えた側に「撃破」の火花を出さない
                     const success = a1.applyMerge(a2);
                     if (success) {
                         window.soundEngine.playMergeSound(a1.mergeLevel);
@@ -507,6 +535,7 @@ class CombatManager {
                 const distS = Math.abs(e1.s - e2.s);
                 if (distS <= 22) {
                     e2.isAlive = false;
+                    e2.rewardGiven = true; // 合体で消えた側は撃破扱いにしない（報酬は合体後の manaReward 2.2倍に含まれる）
                     const success = e1.applyMerge(e2);
                     if (success) {
                         window.soundEngine.playMergeSound(2);
@@ -526,10 +555,10 @@ class CombatManager {
         let enemyPushPower = 0;
 
         for (const ally of this.allies) {
-            if (ally.isStopped) allyPushPower += ally.pushPower;
+            if (ally.isAlive && ally.isStopped) allyPushPower += ally.pushPower;
         }
         for (const enemy of this.enemies) {
-            if (enemy.isStopped) enemyPushPower += enemy.pushPower;
+            if (enemy.isAlive && enemy.isStopped) enemyPushPower += enemy.pushPower;
         }
 
         // 【バグ修正】双方が前線で接触して押し合っている時のみ前線が移動する

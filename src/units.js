@@ -91,6 +91,9 @@ class Ball extends BaseUnit {
         // トゲ玉の継続ダメージタイマー
         this.spikeTimer = 0;
 
+        // ボムボールの爆発範囲（マージで個体ごとに拡張。共有の config は書き換えない）
+        this.explosionRadius = config.explosionRadius || 0;
+
         // 派生ステータス（マージ・雪だるま成長・ジェットの各増分を独立管理し、
         // 互いの上書きによる打ち消し合いを防ぐ）
         this.basePushPower = config.pushPower;
@@ -135,7 +138,7 @@ class Ball extends BaseUnit {
 
         // ボムボールの爆発範囲拡張
         if (this.config.isBomb) {
-            this.config.explosionRadius = Math.round((this.config.explosionRadius || 95) * 1.35);
+            this.explosionRadius = Math.round((this.explosionRadius || 95) * 1.35);
             this.atk = Math.round(this.atk * 1.6);
         }
 
@@ -228,7 +231,8 @@ class Ball extends BaseUnit {
     render(ctx) {
         ctx.save();
 
-        const curRadius = this.radius * this.scaleMultiplier;
+        // 合体直後のポヨンッ拡縮（mergeScaleAnim）も見た目の半径に反映する
+        const curRadius = this.radius * this.scaleMultiplier * this.mergeScaleAnim;
 
         // スーパーボールの跳ね（板の法線方向へオフセット）
         const renderX = this.x + (this.nx || 0) * (this.jumpHeight || 0);
@@ -518,6 +522,9 @@ class Enemy extends BaseUnit {
         }
 
         ctx.translate(this.x, this.y);
+        // ★ELITE 合体の巨大化（scaleMultiplier）と合体直後のポヨンッ拡縮を見た目に反映する
+        const visualScale = this.scaleMultiplier * this.mergeScaleAnim;
+        ctx.scale(visualScale, visualScale);
         ctx.rotate(this.rotation);
 
         // 1. 球体グラデーション
@@ -667,7 +674,7 @@ class Enemy extends BaseUnit {
             ctx.font = 'bold 11px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            const badgeY = this.y - this.radius - 20;
+            const badgeY = this.y - this.radius * this.scaleMultiplier - 20;
             ctx.fillStyle = '#1e272e';
             ctx.strokeStyle = '#e74c3c';
             ctx.lineWidth = 2;
@@ -682,7 +689,7 @@ class Enemy extends BaseUnit {
             ctx.font = 'bold 10px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            const badgeY = this.y - this.radius - 16;
+            const badgeY = this.y - this.radius * this.scaleMultiplier - 16;
             ctx.fillStyle = '#c0392b';
             ctx.strokeStyle = '#f1c40f';
             ctx.lineWidth = 1.5;
@@ -703,7 +710,7 @@ class Enemy extends BaseUnit {
         const barW = this.isTitan ? 90 : Math.max(28, this.radius * 2);
         const barH = this.isTitan ? 7 : 5;
         const bx = this.x - barW / 2;
-        const by = this.y - this.radius - (this.isTitan ? 10 : 9);
+        const by = this.y - this.radius * this.scaleMultiplier - (this.isTitan ? 10 : 9);
 
         ctx.fillStyle = 'rgba(0,0,0,0.7)';
         ctx.fillRect(bx, by, barW, barH);
