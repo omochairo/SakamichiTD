@@ -31,6 +31,16 @@ class SoundEngine {
         this.resumeIfNeeded();
     }
 
+    // 音量 (0〜1)。以後に鳴らす効果音から反映される
+    setVolume(volume) {
+        const v = Number(volume);
+        this.volume = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : this.volume;
+    }
+
+    setEnabled(enabled) {
+        this.enabled = !!enabled;
+    }
+
     // suspended / interrupted（iOS Safari の割り込み・タブ復帰時）なら再開を試みる
     resumeIfNeeded() {
         if (!this.ctx || this.ctx.state === 'running' || this.ctx.state === 'closed') return;

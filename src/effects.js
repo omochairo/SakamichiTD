@@ -5,6 +5,7 @@
 class EffectManager {
     constructor() {
         this.shakeTime = 0;
+        this.shakeDuration = 0;
         this.shakeMagnitude = 0;
         this.shakeX = 0;
         this.shakeY = 0;
@@ -41,9 +42,21 @@ class EffectManager {
         this.triggerHitStop(0.08);
     }
 
+    // 揺れは magnitude から duration 秒かけて 0 へ線形に減衰する。
+    // 今の揺れ（減衰後）より強い揺れが来たら置き換え、弱ければ今の揺れを続ける
+    // （強さと長さを別々に max すると、弱く長い揺れが強い揺れの大きさで続いてしまう）
     triggerShake(magnitude = 6, duration = 0.15) {
-        this.shakeMagnitude = Math.max(this.shakeMagnitude, magnitude);
-        this.shakeTime = Math.max(this.shakeTime, duration);
+        if (duration <= 0) return;
+        if (magnitude >= this.currentShakeMagnitude()) {
+            this.shakeMagnitude = magnitude;
+            this.shakeDuration = duration;
+            this.shakeTime = duration;
+        }
+    }
+
+    currentShakeMagnitude() {
+        if (this.shakeTime <= 0 || !this.shakeDuration) return 0;
+        return this.shakeMagnitude * Math.min(1, this.shakeTime / this.shakeDuration);
     }
 
     triggerHitStop(duration = 0.05) {
@@ -162,10 +175,13 @@ class EffectManager {
 
     spawnDamageText(x, y, amount, isCrit = false, color = null) {
         const textColor = color || (isCrit ? '#ff3838' : '#ffffff');
+        // 文字列（'GUARD!' や '⚔️ 中ボス出現！' 等）はそのまま出す。数値だけ丸めて CRIT を付ける
+        // （以前は文字列も Math.round に通しており、'NaN' / 'CRIT! NaN' と表示されていた）
+        const isLabel = typeof amount === 'string';
         this.damageTexts.push({
             x: x + (Math.random() - 0.5) * 16,
             y: y - 5,
-            text: isCrit ? `CRIT! ${Math.round(amount)}` : `${Math.round(amount)}`,
+            text: isLabel ? amount : (isCrit ? `CRIT! ${Math.round(amount)}` : `${Math.round(amount)}`),
             color: textColor,
             size: isCrit ? 19 : 12,
             life: 0.6,
@@ -175,15 +191,37 @@ class EffectManager {
         });
     }
 
-    // ジグザグコース用のバンパー配置
-    setupBumpers() {
-        this.bumpers = [
-            { x: 230, y: 190, radius: 22, pulse: 0, flashTimer: 0 },
-            { x: 240, y: 380, radius: 24, pulse: 0, flashTimer: 0 },
-            { x: 250, y: 570, radius: 22, pulse: 0, flashTimer: 0 },
-            { x: 100, y: 260, radius: 20, pulse: 0, flashTimer: 0 },
-            { x: 380, y: 450, radius: 20, pulse: 0, flashTimer: 0 }
+    // ジグザグコース用のバンパー配置。座標を固定すると Stage 2（4 段）でコースから外れるため、
+    // コース上の位置（総延長に対する割合）から求め、ボールが必ず通る場所に置く
+    setupBumpers(coursePath) {
+        const layout = [
+            { at: 0.14, radius: 22 },
+            { at: 0.32, radius: 20 },
+            { at: 0.50, radius: 24 },
+            { at: 0.68, radius: 20 },
+            { at: 0.86, radius: 22 }
         ];
+        this.bumpers = layout.map(({ at, radius }) => {
+            const pt = coursePath.getPointAt(coursePath.totalLength * at);
+            // 板の上側へ少し浮かせる（ボールの中心線と重ならないと当たらない程度に留める）
+            return {
+                at,
+                x: pt.x + pt.nx * 6,
+                y: pt.y + pt.ny * 6,
+                radius,
+                pulse: 0,
+                flashTimer: 0,
+                hitCooldown: 0
+            };
+        });
+    }
+
+    // ステージ切り替え時に、発動中のバンパーを新しいコースに置き直す
+    relayoutBumpers(coursePath) {
+        if (this.bumpers.length === 0) return;
+        const pulses = this.bumpers.map(b => b.pulse);
+        this.setupBumpers(coursePath);
+        this.bumpers.forEach((b, i) => { b.pulse = pulses[i] || 0; });
     }
 
     clearBumpers() {
@@ -202,12 +240,12 @@ class EffectManager {
         // 画面シェイク
         if (this.shakeTime > 0) {
             this.shakeTime -= dt;
-            const progress = this.shakeTime / 0.3;
-            const currentMag = this.shakeMagnitude * Math.max(0, progress);
+            const currentMag = this.currentShakeMagnitude();
             this.shakeX = (Math.random() - 0.5) * 2 * currentMag;
             this.shakeY = (Math.random() - 0.5) * 2 * currentMag;
         } else {
             this.shakeMagnitude = 0;
+            this.shakeDuration = 0;
             this.shakeX = 0;
             this.shakeY = 0;
         }
@@ -438,7 +476,10 @@ class EffectManager {
             ctx.fillText(d.text, d.x, d.y);
             ctx.restore();
         });
+    }
 
+    // 画面全体に掛かる帯・暗転。画面揺れの translate の外で描く（帯ごと揺れて暗転の端に隙間が出ないように）
+    renderOverlays(ctx) {
         // 7. WARNING警告帯演出（ボス出現時）
         if (this.warningTimer > 0) {
             ctx.save();

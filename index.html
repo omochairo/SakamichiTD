@@ -138,6 +138,16 @@
                 </button>
             </div>
 
+            <!-- 一時停止・音の操作 -->
+            <div class="debug-toolbar system-toolbar">
+                <button id="btn-pause" class="debug-btn" title="一時停止 / 再開 (キー: Space)">⏸ 一時停止</button>
+                <button id="btn-mute" class="debug-btn" title="音のオン / オフ (キー: N)">🔊 音: ON</button>
+                <label class="volume-control" title="音量">
+                    <span>音量</span>
+                    <input id="volumeSlider" type="range" min="0" max="100" step="5" value="50" aria-label="音量">
+                </label>
+            </div>
+
             <!-- デバッグ・検証用ツールバー -->
             <div class="debug-toolbar">
                 <button id="btn-mana" class="debug-btn" title="無限マナ切り替え (キー: M)">無限マナ: OFF</button>
