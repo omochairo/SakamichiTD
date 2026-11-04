@@ -22,6 +22,9 @@ body {
     width: 480px;
     max-width: 100vw;
     height: 100vh;
+    /* スマホのブラウザではアドレスバー分 100vh が可視領域より高く、下部の操作パネルが隠れるため
+       対応ブラウザでは動的ビューポート高さを使う（非対応ブラウザは上の 100vh のまま） */
+    height: 100dvh;
     max-height: 980px;
     background: #1e272e;
     display: flex;
@@ -446,6 +449,10 @@ body {
     border: 2px solid #f1c40f;
     border-radius: 14px;
     width: 90%;
+    /* 背の低い画面（横向きスマホ等）で3択カードがはみ出して選べなくなるのを防ぐ */
+    max-height: 94%;
+    overflow-y: auto;
+    overflow-x: hidden;
     padding: 18px 14px;
     box-shadow: 0 0 30px rgba(241, 196, 15, 0.4);
     text-align: center;

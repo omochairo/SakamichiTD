@@ -193,12 +193,19 @@ class GameManager {
 
         // ボスWaveへ即時スキップボタン
         document.getElementById('btn-skip-boss')?.addEventListener('click', () => {
-            if (this.isGameOver || this.isVictory) return;
-            this.startWave(4);
+            this.skipToBossWave();
         });
 
         // キーボードショートカット
         window.addEventListener('keydown', (e) => {
+            // Space はフォーカス中のボタン（直前にクリックした出撃ボタン等）を押下扱いにしてしまうため、
+            // ブラウザ既定動作を止める（一時停止のつもりがボールが出撃する事故の防止）
+            if (e.code === 'Space') e.preventDefault();
+
+            // レリック3択中・勝敗確定後はゲーム操作キーを受け付けない
+            // （Space でモーダル表示中に一時停止が解除される、裏で出撃・必殺技が発動する等の防止）
+            if (this.relicModalOpen || this.isGameOver || this.isVictory) return;
+
             if (e.key === '1') this.spawnBall('pingpong');
             else if (e.key === '2') this.spawnBall('iron');
             else if (e.key === '3') this.spawnBall('spike');
@@ -218,7 +225,7 @@ class GameManager {
             } else if (e.key.toLowerCase() === 't') {
                 this.toggleStage();
             } else if (e.key.toLowerCase() === 'b') {
-                if (!this.isGameOver && !this.isVictory) this.startWave(4);
+                this.skipToBossWave();
             } else if (e.code === 'Space') {
                 this.isPaused = !this.isPaused;
             }
@@ -232,6 +239,18 @@ class GameManager {
         document.getElementById('btn-loop-continue')?.addEventListener('click', () => {
             this.startNewGamePlus();
         });
+    }
+
+    // ボスWaveへ即時スキップ（デバッグ用）
+    skipToBossWave() {
+        if (this.isGameOver || this.isVictory) return;
+        // レリック3択中にスキップすると、選択時のコールバックで startWave(4 + 1) が走り
+        // 「Wave 5 / 4」になってしまうため受け付けない
+        if (this.relicModalOpen) return;
+        // 既にボスWave中に再実行すると、タイタンが2体目以降として湧き、
+        // HPバーと撃破演出が最初の1体を追跡しなくなるため受け付けない
+        if (this.wave >= this.maxWave && this.bossSpawned) return;
+        this.startWave(this.maxWave);
     }
 
     toggleStage() {
