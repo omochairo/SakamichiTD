@@ -170,6 +170,9 @@ class SkillManager {
         this.effectManager.setupBumpers(this.coursePath);
         this.effectManager.triggerShake(6, 0.25);
         window.soundEngine.playPinball(1.2);
+        // 出ている間はマナの回復が 3 倍（game.js の isPinballManaBoost）。発動したことが分かるよう文字を出す
+        const gate = this.coursePath && this.coursePath.allyGate;
+        if (gate) this.effectManager.spawnDamageText(gate.x, gate.y + 45, '⚡ マナ回復×3', true, '#00d2d3');
     }
 
     updatePinballCollisions(dt) {

@@ -70,6 +70,9 @@ class CombatManager {
         for (let i = 0; i < this.allies.length; i++) {
             const ally = this.allies[i];
             let shouldStop = false;
+            // 前線の戦いに加わっているか（列の後ろの味方が「前がつながっているか」を見るのに使う）
+            ally.isEngaged = false;
+            ally.engagedTarget = null;
 
             // このフレームの合体で消えた味方は行動させない
             if (!ally.isAlive) {
@@ -139,6 +142,8 @@ class CombatManager {
                 // 前線接触距離または前線至近（75px以内）に追いついた味方は全員攻撃に参加！
                 if (distS <= contactDist + 75 && distS >= -contactDist) {
                     shouldStop = true;
+                    ally.isEngaged = true;
+                    ally.engagedTarget = targetEnemy;
 
                     // 初撃（激突ボーナス）
                     if (ally.isFirstHit) {
@@ -169,6 +174,14 @@ class CombatManager {
                 const minSpacing = (ally.radius * ally.scaleMultiplier + aheadAlly.radius * aheadAlly.scaleMultiplier) * 0.35;
                 if (distS <= minSpacing) {
                     shouldStop = true;
+                    // 前線で戦っている味方の後ろに詰まった味方も、同じ敵を攻撃する（v3）。
+                    // 以前は前線から 75px 以内しか殴れず、数が多いと列の後ろが棒立ちのまま押し合いが止まっていた
+                    // スーパーボールは後衛を狙うので、その後ろの味方は狙いを引き継がない（離れた敵に当たってしまう）
+                    if (aheadAlly.isEngaged && aheadAlly.engagedTarget && aheadAlly.config.id !== 'super') {
+                        ally.isEngaged = true;
+                        ally.engagedTarget = aheadAlly.engagedTarget;
+                        this.queuedAllyStrike(ally, aheadAlly.engagedTarget);
+                    }
                 }
             }
 
@@ -186,6 +199,8 @@ class CombatManager {
         for (let j = 0; j < this.enemies.length; j++) {
             const enemy = this.enemies[j];
             let shouldStop = false;
+            enemy.isEngaged = false;
+            enemy.engagedTarget = null;
 
             // この周回中に倒された敵は攻撃・咆哮・押し合いに参加させない
             if (!enemy.isAlive) {
@@ -237,6 +252,8 @@ class CombatManager {
                 } else if (distS <= contactDist + 65 && distS >= -contactDist) {
                     // 近接接触（前線付近の全敵が一斉攻撃）
                     shouldStop = true;
+                    enemy.isEngaged = true;
+                    enemy.engagedTarget = leadingAlly;
 
                     // 酸液自爆スライムの即時接触自爆！
                     if (enemy.isAcidSuicide) {
@@ -336,6 +353,12 @@ class CombatManager {
                 const minSpacing = (enemy.radius * enemy.scaleMultiplier + aheadEnemy.radius * aheadEnemy.scaleMultiplier) * 0.35;
                 if (distS <= minSpacing) {
                     shouldStop = true;
+                    // 前線で戦っている敵の後ろに詰まった敵も、同じ味方を攻撃する（v3。味方側と対にする）
+                    if (aheadEnemy.isEngaged && aheadEnemy.engagedTarget) {
+                        enemy.isEngaged = true;
+                        enemy.engagedTarget = aheadEnemy.engagedTarget;
+                        this.queuedEnemyStrike(enemy, aheadEnemy.engagedTarget);
+                    }
                 }
             }
 
@@ -584,6 +607,28 @@ class CombatManager {
                 }
             }
         }
+    }
+
+    // 列の後ろに詰まった味方の攻撃（前の味方と同じ敵を叩く）。初撃ボーナス・ノックバックは前線の味方だけ
+    queuedAllyStrike(ally, target) {
+        if (!target.isAlive) return;
+        if (ally.config.id === 'pingpong' && target.isGhost) return; // ピンポン玉はゴーストに当たらない
+        if (ally.attackTimer < ally.attackInterval) return;
+        ally.attackTimer = consumeAttackTimer(ally.attackTimer, ally.attackInterval);
+        const ghostBonus = (target.isGhost && (ally.config.id === 'spike' || ally.config.id === 'bomb')) ? 1.5 : 1.0;
+        const dmg = ally.atk * ally.scaleMultiplier * ghostBonus;
+        target.takeDamage(dmg);
+        this.effectManager.spawnDamageText(target.x, target.y, dmg);
+    }
+
+    // 列の後ろに詰まった敵の攻撃（前の敵と同じ味方を叩く）。突風・なぎ払い・自爆・ノックバックは前線の敵だけ
+    queuedEnemyStrike(enemy, target) {
+        if (!target.isAlive || enemy.isRanged || enemy.isAcidSuicide) return;
+        if (enemy.isGhost && target.config.id === 'pingpong') return;
+        if (enemy.attackTimer < enemy.attackInterval) return;
+        enemy.attackTimer = consumeAttackTimer(enemy.attackTimer, enemy.attackInterval);
+        target.takeDamage(enemy.atk);
+        this.effectManager.spawnDamageText(target.x, target.y, enemy.atk, false, '#f39c12');
     }
 
     // 押し合い判定（前線ズリズリ移動）

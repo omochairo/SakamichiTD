@@ -93,6 +93,10 @@ class GameManager {
         return !this.isPaused && !this.relicModalOpen && !this.isGameOver && !this.isVictory;
     }
 
+    isPinballManaBoost() {
+        return !!(this.skillManager && this.skillManager.pinballTimer > 0);
+    }
+
     useSkill(skillId) {
         if (!this.canAct()) return false;
         return this.skillManager.triggerSkill(skillId);
@@ -164,7 +168,7 @@ class GameManager {
         document.querySelectorAll('.skill-btn').forEach(btn => {
             const config = SPECIAL_SKILLS[btn.dataset.skill.toUpperCase()];
             if (!config) return;
-            btn.title = `${config.icon} ${config.name} (キー: ${config.key})\n${config.desc}`;
+            btn.title = `${config.icon} ${config.name} (キー: ${config.key}・待機 ${config.cooldown} 秒)\n${config.desc}`;
             const keyEl = btn.querySelector('.skill-hotkey');
             if (keyEl) keyEl.textContent = config.key;
             const iconEl = btn.querySelector('.skill-icon');
@@ -475,9 +479,9 @@ class GameManager {
         // Waveごとの敵部隊総数設定
         // ウェーブ 1〜3 は ENEMY_TUNING.COUNT_MULT 倍（押し合いになるよう増やした）。ボスのウェーブ 4 の護衛は元のまま
         const mult = ENEMY_TUNING.COUNT_MULT;
-        if (this.wave === 1) this.waveTotalEnemies = 10 * mult;
-        else if (this.wave === 2) this.waveTotalEnemies = 12 * mult;
-        else if (this.wave === 3) this.waveTotalEnemies = 14 * mult;
+        if (this.wave === 1) this.waveTotalEnemies = Math.round(10 * mult);
+        else if (this.wave === 2) this.waveTotalEnemies = Math.round(12 * mult);
+        else if (this.wave === 3) this.waveTotalEnemies = Math.round(14 * mult);
         else this.waveTotalEnemies = 16;
 
         // 敵要塞のフォースバリア展開（Wave 1〜3での早期破壊クリアを完全防止）
@@ -683,7 +687,9 @@ class GameManager {
             if (this.infiniteMana) {
                 this.mana = this.maxMana;
             } else {
-                this.mana = Math.min(this.maxMana, this.mana + this.manaRegen * dt);
+                // ピンボール・フィーバーが出ている間はマナの回復が 3 倍（効果が目に見えるように。v3）
+                const regenMult = this.isPinballManaBoost() ? 3 : 1;
+                this.mana = Math.min(this.maxMana, this.mana + this.manaRegen * regenMult * dt);
             }
 
             for (const k in this.ballCooldowns) {
@@ -856,7 +862,7 @@ class GameManager {
         if (manaBar && manaText) {
             const pct = Math.min(100, (this.mana / this.maxMana) * 100);
             manaBar.style.width = `${pct}%`;
-            manaText.textContent = `${Math.floor(this.mana)} / ${this.maxMana}`;
+            manaText.textContent = `${Math.floor(this.mana)} / ${this.maxMana}${this.isPinballManaBoost() ? ' ⚡×3' : ''}`;
         }
 
         const allyHpFill = document.getElementById('allyHpFill');
