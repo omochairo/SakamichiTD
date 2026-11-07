@@ -179,7 +179,7 @@ class GameManager {
         const scoreEl = document.getElementById('victoryScoreText');
         if (scoreEl) scoreEl.textContent = `スコア: ${this.score}（ベスト: ${this.bestScore}）`;
         const loopBtn = document.getElementById('btn-loop-continue');
-        if (loopBtn) loopBtn.textContent = `🔁 強くてニューゲーム (${this.loopCount + 2}周目へ)`;
+        if (loopBtn) loopBtn.innerHTML = `🔁 強くてニューゲーム (${this.loopCount + 2}周目へ)<br><small>敵の攻撃力と防御力が ${this.loopCount + 2} 倍に</small>`;
         document.getElementById('victoryModal')?.classList.remove('hidden');
     }
 
@@ -217,10 +217,11 @@ class GameManager {
     // 敵ステータスに周回インフレ倍率を適用（強くてニューゲーム用）
     applyLoopScaling(enemy) {
         if (this.loopCount <= 0) return;
-        const mult = 1 + this.loopCount * 0.35;
-        enemy.maxHp = Math.round(enemy.maxHp * mult);
-        enemy.hp = enemy.maxHp;
+        // 2 周目は敵の攻撃力・防御力が 2 倍、3 周目は 3 倍、4 周目は 4 倍…（クリアしても遊び続けられるように）
+        // 防御力 N 倍 = 受けるダメージが 1/N（Enemy.takeDamage の loopDefense）
+        const mult = this.loopCount + 1;
         enemy.atk = Math.round(enemy.atk * mult);
+        enemy.loopDefense = mult;
         enemy.manaReward = Math.round(enemy.manaReward * (1 + this.loopCount * 0.5));
     }
 
@@ -472,9 +473,11 @@ class GameManager {
         this.wave3MidBossSpawned = false;
 
         // Waveごとの敵部隊総数設定
-        if (this.wave === 1) this.waveTotalEnemies = 10;
-        else if (this.wave === 2) this.waveTotalEnemies = 12;
-        else if (this.wave === 3) this.waveTotalEnemies = 14;
+        // ウェーブ 1〜3 は ENEMY_TUNING.COUNT_MULT 倍（押し合いになるよう増やした）。ボスのウェーブ 4 の護衛は元のまま
+        const mult = ENEMY_TUNING.COUNT_MULT;
+        if (this.wave === 1) this.waveTotalEnemies = 10 * mult;
+        else if (this.wave === 2) this.waveTotalEnemies = 12 * mult;
+        else if (this.wave === 3) this.waveTotalEnemies = 14 * mult;
         else this.waveTotalEnemies = 16;
 
         // 敵要塞のフォースバリア展開（Wave 1〜3での早期破壊クリアを完全防止）
@@ -510,6 +513,7 @@ class GameManager {
 
         // スポーン間隔（3体まとめて出た後に一息つく緩急のあるテンポ）
         let spawnInterval = Math.max(1.6, 3.8 - this.wave * 0.4);
+        if (this.wave < this.maxWave) spawnInterval *= ENEMY_TUNING.SPAWN_INTERVAL_MULT;
         if (this.enemiesSpawnedInWave % 4 === 3) spawnInterval *= 1.8;
 
         if (this.enemiesSpawnedInWave < this.waveTotalEnemies && this.enemySpawnTimer >= spawnInterval) {
@@ -553,8 +557,8 @@ class GameManager {
 
         if (this.wave === 1) {
             // Wave 1: ゴブリン歩兵 ＋ 酸液自爆スライム（ピンポン単騎だと自爆で溶かされる）
-            // 終盤（9体目）にトルネード・ゴーレムを1体だけ混ぜ、Wave2の"予告編"にする
-            if (this.enemiesSpawnedInWave === 8) {
+            // 10 体ごとに 1 体（9・19 体目）トルネード・ゴーレムを混ぜ、Wave2の"予告編"にする
+            if (this.enemiesSpawnedInWave % 10 === 8) {
                 enemyKey = 'TORNADO_GOLEM';
             } else {
                 enemyKey = Math.random() < 0.65 ? 'GOBLIN' : 'ACID_SLIME';

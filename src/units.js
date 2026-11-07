@@ -438,6 +438,17 @@ class Enemy extends BaseUnit {
         this.isBoss = config.isBoss || false;
         this.walkAnim = 0;
 
+        // ボス以外は底上げする（ENEMY_TUNING）。ボスの強さは変えない
+        if (!this.isBoss) {
+            this.maxHp = Math.round(this.maxHp * ENEMY_TUNING.HP_MULT);
+            this.hp = this.maxHp;
+            this.atk = Math.round(this.atk * ENEMY_TUNING.ATK_MULT);
+            this.pushPower += ENEMY_TUNING.PUSH_BONUS;
+            this.manaReward = Math.max(1, Math.round(this.manaReward * ENEMY_TUNING.MANA_REWARD_MULT));
+        }
+        this.eliteArmor = 0;
+        this.loopDefense = 1;
+
         // マージ合体システム (Lv.1 -> Lv.2 エリート)
         this.mergeLevel = 1;
         this.mergeScaleAnim = 1.0;
@@ -472,6 +483,13 @@ class Enemy extends BaseUnit {
         if (this.bossArmor > 0) {
             amount *= (1.0 - this.bossArmor);
         }
+        if (this.eliteArmor > 0) {
+            amount *= (1.0 - this.eliteArmor);
+        }
+        // 周回（強くてニューゲーム）の防御力
+        if (this.loopDefense > 1) {
+            amount /= this.loopDefense;
+        }
         super.takeDamage(amount);
     }
 
@@ -480,9 +498,11 @@ class Enemy extends BaseUnit {
         if (this.mergeLevel >= 2 || this.isBoss) return false;
         this.mergeLevel++;
 
-        this.maxHp = Math.round((this.maxHp + other.maxHp) * 1.3);
+        // エリートはかなり硬く・痛くする（体力・攻撃力に加えて被ダメージも減らす）
+        this.maxHp = Math.round((this.maxHp + other.maxHp) * ENEMY_TUNING.ELITE_HP_MULT);
         this.hp = this.maxHp;
-        this.atk = Math.round(this.atk * 1.7);
+        this.atk = Math.round(this.atk * ENEMY_TUNING.ELITE_ATK_MULT);
+        this.eliteArmor = ENEMY_TUNING.ELITE_ARMOR;
         this.pushPower += (other.pushPower + 1);
         this.scaleMultiplier = 1.35;
         this.mergeScaleAnim = 1.4;
