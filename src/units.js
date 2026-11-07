@@ -127,7 +127,9 @@ class Ball extends BaseUnit {
     // マージ・雪だるま成長・ジェットの効果を合成して最終ステータスへ反映
     recomputeDerivedStats() {
         this.scaleMultiplier = Math.min(3.2, this.mergeScale * this.growthScale);
-        this.pushPower = this.basePushPower + this.mergePushBonus + this.jetPushBonus + this.growthPushBonus;
+        // 難易度の押す力の倍率（イージー・ノーマル 2 倍、ハード 1.5 倍。v5）
+        const pushMult = (window.gameManager && window.gameManager.pushMult) || 1;
+        this.pushPower = (this.basePushPower + this.mergePushBonus + this.jetPushBonus + this.growthPushBonus) * pushMult;
     }
 
     // 同種ボールとの合体進化
