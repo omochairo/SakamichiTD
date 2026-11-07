@@ -21,6 +21,27 @@ class SkillManager {
         this.activeRelics = [];
         this.relicState = {};
         this.coursePath = null;
+        // 必殺技は最初は使えず、ウェーブクリアのレリック 3 択で決まった順に手に入れる（v4）
+        this.unlockedSkills = new Set();
+    }
+
+    isSkillUnlocked(skillId) {
+        return this.unlockedSkills.has(skillId);
+    }
+
+    // まだ持っていない必殺技のうち、順番が最初のものをレリックのカードにする
+    nextSkillRelic() {
+        const next = SKILL_UNLOCK_ORDER.find(id => !this.unlockedSkills.has(id));
+        if (!next) return null;
+        const c = SPECIAL_SKILLS[next.toUpperCase()];
+        return {
+            id: 'skill_' + next,
+            skillId: next,
+            name: '必殺技: ' + c.name,
+            rarity: 'EPIC',
+            icon: c.icon,
+            desc: c.desc + '（待機 ' + c.cooldown + ' 秒）',
+        };
     }
 
     init(combatManager, effectManager, relicState, coursePath) {
@@ -60,6 +81,7 @@ class SkillManager {
 
     triggerSkill(skillId) {
         if (this.cooldowns[skillId] > 0) return false;
+        if (!this.unlockedSkills.has(skillId)) return false;
 
         const config = SPECIAL_SKILLS[skillId.toUpperCase()];
         if (!config) return false;
@@ -216,13 +238,17 @@ class SkillManager {
     //  fortress_repair だけで、他は何も起きない選択肢になっていた）
     getRandomRelicOptions(count = 3) {
         const available = RELIC_POOL.filter(r => !this.activeRelics.some(ar => ar.id === r.id));
+        // 次の必殺技は毎回 1 枚目に必ず出す（選ばなければ次のクリアでまた出る）
+        const skillCard = this.nextSkillRelic();
+        if (skillCard) count -= 1;
         // Fisher-Yates（sort に乱数を渡す方法は偏るため）
         const shuffled = [...available];
         for (let i = shuffled.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
-        return shuffled.slice(0, Math.min(count, shuffled.length));
+        const picked = shuffled.slice(0, Math.max(0, Math.min(count, shuffled.length)));
+        return skillCard ? [skillCard, ...picked] : picked;
     }
 
     acquireRelic(relic) {
@@ -231,6 +257,10 @@ class SkillManager {
         this.activeRelics.push(relic);
         this.relicState[relic.id] = true;
         window.soundEngine.playUpgrade();
+        if (relic.skillId) {
+            this.unlockedSkills.add(relic.skillId);
+            this.cooldowns[relic.skillId] = 0;
+        }
 
         if (relic.id === 'ink_overdrive') {
             // GameManagerはコンストラクタでGAME_CONFIGの値をコピーして保持しているため、

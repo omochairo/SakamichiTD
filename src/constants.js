@@ -62,6 +62,17 @@ class CoursePath {
         });
 
         this.totalLength = accumulated;
+
+        // 折り返しの頂点（進む向きの左右が入れ替わる点）の s。押し戻されてここを越えたボールは場外へ飛ぶ（v4）
+        this.cornerS = [];
+        this.cornerOutX = [];
+        for (let i = 1; i < this.samples.length; i++) {
+            const a = this.samples[i - 1].tx, b = this.samples[i].tx;
+            if (Math.abs(a) > 0.05 && Math.abs(b) > 0.05 && Math.sign(a) !== Math.sign(b)) {
+                this.cornerS.push(this.samples[i].s);
+                this.cornerOutX.push(Math.sign(a)); // 頂点の手前で向かっていた側 = コースの外側
+            }
+        }
     }
 
     // 距離 s (0 <= s <= totalLength) における位置・接線・法線を取得
@@ -230,6 +241,7 @@ const GAME_CONFIG = {
     KNOCKBACK_DECAY: 0.04, // ノックバック速度の 1 秒あたりの残存率（小さいほど短時間で止まる）
 
     MAX_ALLIES: 60,        // 場に出せる味方ボールの上限（分裂セルの子玉を含む）
+    FORTRESS_ZONE: 180,    // 敵要塞の手前この距離 (px) に入ったボールは敵の前で止まらず、要塞に当たって転がり落ちる（出てきた直後の敵を囲ませない。v4）
 
     MANA_MAX: 200,
     MANA_REGEN_BASE: 14,   // 毎秒回復量
@@ -243,10 +255,11 @@ const BALL_TYPES = {
     PINGPONG: {
         id: 'pingpong',
         name: 'ピンポン玉',
-        cost: 25,
-        cooldown: 0.8,
-        hp: 35, // 耐久力を大幅にダウン（敵の攻撃1〜2発で割れる）
-        atk: 8,
+        // v4 の役割: 全部弱いが、安くてたくさん出せる（ピンポンだけで勝てないように）
+        cost: 30,
+        cooldown: 0.6,
+        hp: 35,
+        atk: 6,
         attackInterval: 0.7,
         radius: 12,
         baseSpeed: 170,
@@ -255,8 +268,8 @@ const BALL_TYPES = {
         knockbackFactor: 0.3, // 軽量のため敵を弾き飛ばせない
         color: '#fffae0',
         strokeColor: '#f39c12',
-        role: '壁役・時間稼ぎ',
-        desc: '安価で連打可能。軽量の足止め壁役。耐久力は低く単体では倒されやすい。',
+        role: '数で勝負',
+        desc: '体力・攻撃・押す力はどれも弱いが、安くてすぐ次を出せる。数をそろえて時間をかせぐ。',
         spinMultiplier: 1.6,
         immuneKnockback: false,
     },
@@ -265,18 +278,19 @@ const BALL_TYPES = {
         name: '鉄球 (アイアン)',
         cost: 65,
         cooldown: 3.5,
-        hp: 380,
-        atk: 25,
-        attackInterval: 1.2,
+        // v4 の役割: 押す力と体力が大きい。攻撃は弱く、守り（受けるダメージの軽減）も無い
+        hp: 450,
+        atk: 5,
+        attackInterval: 1.4,
         radius: 19,
         baseSpeed: 95,
         maxSpeed: 180,
-        pushPower: 3,
+        pushPower: 5,
         knockbackFactor: 1.5, // 重厚な衝突で敵を大きく弾き飛ばす
         color: '#7f8c8d',
         strokeColor: '#2c3e50',
-        role: '高耐久タンク',
-        desc: '重厚な回転と重低音。高HPで敵の攻撃によるノックバックを無効化。ブルドーザー対策に必須。',
+        role: '押し返す',
+        desc: '押す力と体力がいちばん大きく、前線をぐいぐい押し返す。ノックバックも効かない。攻撃は弱い。',
         spinMultiplier: 0.8,
         immuneKnockback: true,
     },
@@ -285,63 +299,67 @@ const BALL_TYPES = {
         name: 'トゲ玉',
         cost: 55,
         cooldown: 2.5,
-        hp: 140,
-        atk: 16,
-        attackInterval: 0.8,
+        // v4 の役割: 攻撃が強い。押す力は弱く、受けるダメージが多い
+        hp: 120,
+        atk: 26,
+        attackInterval: 0.7,
         radius: 15,
         baseSpeed: 135,
         maxSpeed: 240,
-        pushPower: 2,
+        pushPower: 1,
+        damageTaken: 1.4,
         knockbackFactor: 1.0,
         color: '#e74c3c',
         strokeColor: '#962d22',
-        role: '持続アタッカー',
-        desc: 'トゲを高速回転させ突撃。接触中の敵に0.2秒ごとに継続切断ダメージ。ゴーストや集団に特効。',
+        role: '攻撃役',
+        desc: '攻撃がいちばん強く、触れている敵をトゲで削り続ける。ゴーストに特効。押す力は弱く、打たれ弱い。',
         spinMultiplier: 1.3,
         immuneKnockback: false,
-        spikeDps: 22,
+        spikeDps: 34,
     },
     SUPER: {
         id: 'super',
         name: 'スーパーボール',
         cost: 75,
         cooldown: 3.0,
-        hp: 120,
+        // v4 の役割: 遠く（後衛）を攻撃でき、押す力もある。体力が少ない
+        hp: 60,
         atk: 38,
         attackInterval: 0.9,
         radius: 14,
         baseSpeed: 155,
         maxSpeed: 260,
-        pushPower: 1,
+        pushPower: 4,
         knockbackFactor: 0.8,
         color: '#00d2d3',
         strokeColor: '#01a3a4',
-        role: '後衛狙撃アタッカー',
-        desc: '坂をピョンピョン跳ねながら突進。前線を飛び越えて後衛のアーチャーを直接強襲・撃破する。',
+        role: '遠くを攻撃',
+        desc: '跳ねながら前線を飛び越え、後ろの弓兵や奥の敵を直接たたく。押す力もあるが、体力が少ない。',
         spinMultiplier: 1.2,
         immuneKnockback: false,
     },
     BOMB: {
         id: 'bomb',
         name: 'ボムボール',
-        cost: 105,
-        cooldown: 4.5,
+        // v4 の役割: 範囲に大ダメージを与えるが、ぶつかるとすぐ消える（押す力は無い）。105→80 MP に値下げ
+        cost: 80,
+        cooldown: 3.5,
         hp: 125,
-        atk: 130,
+        atk: 180,
         attackInterval: 99,
         radius: 17,
         baseSpeed: 125,
         maxSpeed: 220,
-        pushPower: 2,
+        pushPower: 0,
         knockbackFactor: 2.5,
         color: '#2d3436',
         strokeColor: '#d63031',
-        role: '自爆・範囲殲滅',
-        desc: '導火線がパチパチ光りながら転がる。激突時に大爆発しブルドーザーや密集敵を一網打尽。',
+        role: '範囲の大ダメージ',
+        desc: 'ぶつかった所で大爆発し、まわりの敵にまとめて大ダメージ。爆発したら消えるので、押し合いには残らない。',
         spinMultiplier: 1.0,
         immuneKnockback: false,
         isBomb: true,
-        explosionRadius: 95,
+        explosionRadius: 110, // v4: 95→110
     }
 };
 
@@ -372,6 +390,9 @@ const SPECIAL_SKILLS = {
         desc: '各スロープの隙間にネオンバンパーが多数出現！ボールが高速乱反射して敵軍をタコ殴りにする！出ている間はマナの回復が3倍！'
     }
 };
+
+// 必殺技を手に入れる順番（ウェーブクリアのレリック 3 択の 1 枚目に出る。v4）
+const SKILL_UNLOCK_ORDER = ['giga_rock', 'booster_slope', 'pinball_fever'];
 
 // パッシブ・エピックレリック（ウェーブクリア時 3択）
 const RELIC_POOL = [
@@ -445,8 +466,8 @@ const RELIC_POOL = [
 const ENEMY_TUNING = {
     // v3: 列の後ろの敵も攻撃に加わるようにした（combat.js の queuedEnemyStrike）ので、
     // 総火力が上がった分を体力 4→3・攻撃 3→1.2・押す +3→+2 で戻した（ギガロック無しの自動プレイで調整）
-    HP_MULT: 3.0,           // 体力
-    ATK_MULT: 1.2,          // 攻撃力
+    HP_MULT: 2.2,           // 体力（v4: 必殺技が最初は無いので 3→2.2）
+    ATK_MULT: 1.0,          // 攻撃力（v4: 1.2→1.0）
     PUSH_BONUS: 2,          // 押し出しパワーの上乗せ
     MANA_REWARD_MULT: 0.5,  // 倒したときのマナ（数を増やした分、こちらのマナが増えすぎないように）
     COUNT_MULT: 1.5,        // ウェーブ 1〜3 の敵の数（v2 の 2 倍は多すぎたので v3 で 1.5 倍に）
@@ -616,6 +637,7 @@ window.createStage2Path = createStage2Path;
 window.GAME_CONFIG = GAME_CONFIG;
 window.BALL_TYPES = BALL_TYPES;
 window.SPECIAL_SKILLS = SPECIAL_SKILLS;
+window.SKILL_UNLOCK_ORDER = SKILL_UNLOCK_ORDER;
 window.RELIC_POOL = RELIC_POOL;
 window.ENEMY_TYPES = ENEMY_TYPES;
 window.ENEMY_TUNING = ENEMY_TUNING;

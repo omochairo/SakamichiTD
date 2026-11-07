@@ -912,7 +912,14 @@ class GameManager {
             const cdOverlay = btn.querySelector('.skill-cd-overlay');
             const cdText = btn.querySelector('.skill-cd-text');
 
-            if (cd > 0) {
+            // まだ手に入れていない必殺技は鍵の表示（ウェーブクリアのレリックで手に入る。v4）
+            const locked = !this.skillManager.isSkillUnlocked(skillId);
+            btn.classList.toggle('locked', locked);
+            if (locked) {
+                btn.classList.remove('on-cooldown');
+                if (cdOverlay) cdOverlay.style.height = '0%';
+                if (cdText) cdText.textContent = '🔒';
+            } else if (cd > 0) {
                 btn.classList.add('on-cooldown');
                 if (cdOverlay) cdOverlay.style.height = `${(cd / config.cooldown) * 100}%`;
                 if (cdText) cdText.textContent = cd.toFixed(1) + 's';

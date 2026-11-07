@@ -63,6 +63,10 @@ class CombatManager {
         //   スケール上限の不一致(2.8 vs 2.5)や二重マージによるステータス暴走の原因になっていた。
         this.processMerges();
 
+        // 折り返しの頂点を押し戻されて越えたかを見るため、このフレームの始めの位置を覚えておく（v4）
+        const prevS = new Map();
+        for (const ally of this.allies) prevS.set(ally, ally.s);
+
         // 2. 味方ユニットの前進・停止判定 & 前線重なり合い一斉攻撃
         this.allies.sort((a, b) => b.s - a.s);
         this.enemies.sort((a, b) => a.s - b.s);
@@ -133,6 +137,11 @@ class CombatManager {
                     const archer = aheadEnemies.find(e => e.isRanged);
                     targetEnemy = archer || aheadEnemies[aheadEnemies.length - 1];
                 }
+            }
+
+            // 敵要塞の手前に入ったボールは戦わずにゴールへ抜ける（要塞の前に溜まって、出てきた敵を即座に倒すのを防ぐ。v4）
+            if (ally.s >= totalLength - GAME_CONFIG.FORTRESS_ZONE) {
+                targetEnemy = null;
             }
 
             if (targetEnemy) {
@@ -373,6 +382,7 @@ class CombatManager {
             if (ally.isFalling) continue;
             ally.update(dt, this.effectManager, isBoosterActive);
         }
+        this.checkCornerBlowOff(prevS);
         this.updateFalling(dt);
         for (const enemy of this.enemies) {
             enemy.update(dt);
@@ -692,6 +702,38 @@ class CombatManager {
         const sp = Math.max(90, ally.currentSpeed || 0);
         ally.fallVx = (ally.tx || -1) * sp;
         ally.fallVy = (ally.ty || 0) * sp;
+        ally.fallT = 0;
+        this.fallingAllies.push(ally);
+    }
+
+    // 敵に押し戻されて（ノックバックを含む）折り返しの頂点を坂の上側へ越えたボールは、コースの外へ吹き飛んで消える（v4）
+    checkCornerBlowOff(prevS) {
+        const cs = this.coursePath.cornerS || [];
+        if (cs.length === 0) return;
+        for (const ally of this.allies) {
+            if (!ally.isAlive || ally.isFalling) continue;
+            const before = prevS.get(ally);
+            if (before === undefined || ally.s >= before) continue;
+            for (let k = 0; k < cs.length; k++) {
+                if (ally.s < cs[k] && before >= cs[k]) {
+                    this.blowOffAlly(ally, this.coursePath.cornerOutX[k]);
+                    break;
+                }
+            }
+        }
+    }
+
+    blowOffAlly(ally, outX) {
+        this.effectManager.spawnDamageText(ally.x, ally.y - 10, '場外!!', true, '#e74c3c');
+        this.effectManager.spawnImpactSparks(ally.x, ally.y, 10, '#ffeaa7');
+        window.soundEngine.playPoko();
+        ally.isFalling = true;
+        ally.isAlive = false;
+        ally.effectTriggered = true;
+        ally.isStopped = false;
+        ally.jumpHeight = 0;
+        ally.fallVx = outX * 320;   // コースの外側へ
+        ally.fallVy = -260;         // いったん上へ跳ね上がってから落ちる
         ally.fallT = 0;
         this.fallingAllies.push(ally);
     }

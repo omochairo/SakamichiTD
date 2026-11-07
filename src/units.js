@@ -156,6 +156,11 @@ class Ball extends BaseUnit {
         return true;
     }
 
+    // ボールごとの守りの強さ（受けるダメージの倍率。トゲ玉は 1.4 で打たれ弱い。v4）
+    takeDamage(amount) {
+        super.takeDamage(amount * (this.config.damageTaken || 1));
+    }
+
     // 坂の上へ押し戻されたボールは勢いを失い、初速から転がり直す
     applyKnockback(distance) {
         super.applyKnockback(distance);
