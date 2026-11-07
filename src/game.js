@@ -70,6 +70,96 @@ class GameManager {
         this.loopCount = 0;
         this.score = 0;
         this.bestScore = Number(safeStorage.get('sakamichiTD_bestScore')) || 0;
+
+        // 難易度（v5）。解放の記録はブラウザに保存する（保存できない環境では毎回イージーから）
+        this.progress = this.loadProgress();
+        this.pushMult = 1;
+        const last = safeStorage.get('sakamichiTD_difficulty');
+        this.difficultyId = (last && this.isDifficultyUnlocked(last)) ? last : 'easy';
+    }
+
+    loadProgress() {
+        try {
+            const p = JSON.parse(safeStorage.get('sakamichiTD_progress') || '{}');
+            return { played: !!p.played, bossEasyNormal: !!p.bossEasyNormal, bossHard: !!p.bossHard };
+        } catch (e) {
+            return { played: false, bossEasyNormal: false, bossHard: false };
+        }
+    }
+
+    saveProgress() {
+        safeStorage.set('sakamichiTD_progress', JSON.stringify(this.progress));
+    }
+
+    // 1 回遊ぶとノーマル / イージーかノーマルでボスを倒すとハード / ハードでボスを倒すとインフェルノ
+    isDifficultyUnlocked(id) {
+        if (id === 'easy') return true;
+        if (id === 'normal') return this.progress.played;
+        if (id === 'hard') return this.progress.bossEasyNormal;
+        if (id === 'inferno') return this.progress.bossHard;
+        return false;
+    }
+
+    // スタート画面の難易度ボタンを作る（鍵つきは押せず、解放の条件を出す）
+    renderDifficultyButtons() {
+        const box = document.getElementById('difficultyButtons');
+        if (!box) return;
+        box.innerHTML = '';
+        for (const id of DIFFICULTY_ORDER) {
+            const d = DIFFICULTIES[id];
+            const unlocked = this.isDifficultyUnlocked(id);
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'diff-btn' + (id === this.difficultyId ? ' selected' : '') + (unlocked ? '' : ' locked');
+            btn.dataset.diff = id;
+            btn.disabled = !unlocked;
+            btn.innerHTML = `<span class="diff-name">${unlocked ? d.icon : '🔒'} ${d.name}</span><span class="diff-desc">${unlocked ? d.desc : d.lock}</span>`;
+            btn.addEventListener('click', () => {
+                if (!this.isDifficultyUnlocked(id)) return;
+                this.difficultyId = id;
+                this.renderDifficultyButtons();
+            });
+            box.appendChild(btn);
+        }
+    }
+
+    // 選んだ難易度の補正をかける（スタート時に 1 回）
+    applyDifficulty() {
+        const d = DIFFICULTIES[this.difficultyId] || DIFFICULTIES.inferno;
+        this.difficulty = d;
+        this.pushMult = d.push;
+        this.maxMana = GAME_CONFIG.MANA_MAX * d.mana;
+        this.manaRegen = GAME_CONFIG.MANA_REGEN_BASE * d.mana;
+        this.mana = 60 * d.mana;
+        if (d.allSkills) {
+            for (const id of SKILL_UNLOCK_ORDER) this.skillManager.unlockedSkills.add(id);
+        }
+        safeStorage.set('sakamichiTD_difficulty', d.id);
+        this.updateStageLabel();
+    }
+
+    updateStageLabel() {
+        const el = document.getElementById('stageDisplay');
+        if (!el) return;
+        const d = this.difficulty;
+        el.textContent = `${d ? d.icon + ' ' + d.name + ' ・ ' : ''}Stage ${this.stage} - ${this.stage === 1 ? 'クラシックスロープ' : 'ロングスロープ'}`;
+    }
+
+    // 1 回遊び終えた（勝ち負けどちらでも）
+    markPlayed() {
+        if (!this.progress.played) {
+            this.progress.played = true;
+            this.saveProgress();
+        }
+    }
+
+    // ボスを倒した難易度に応じて次の難易度を解放する
+    markBossDefeated() {
+        const id = this.difficulty && this.difficulty.id;
+        if (id === 'easy' || id === 'normal') this.progress.bossEasyNormal = true;
+        if (id === 'hard') this.progress.bossHard = true;
+        this.progress.played = true;
+        this.saveProgress();
     }
 
     addScore(amount) {
@@ -180,6 +270,7 @@ class GameManager {
         this.isVictory = true;
         window.soundEngine.playVictory();
         this.saveBestScoreIfNeeded();
+        this.markPlayed();
         const scoreEl = document.getElementById('victoryScoreText');
         if (scoreEl) scoreEl.textContent = `スコア: ${this.score}（ベスト: ${this.bestScore}）`;
         const loopBtn = document.getElementById('btn-loop-continue');
@@ -191,6 +282,7 @@ class GameManager {
         this.isGameOver = true;
         window.soundEngine.playDefeat();
         this.saveBestScoreIfNeeded();
+        this.markPlayed();
         const scoreEl = document.getElementById('defeatScoreText');
         if (scoreEl) scoreEl.textContent = `スコア: ${this.score}（ベスト: ${this.bestScore}）`;
         document.getElementById('defeatModal')?.classList.remove('hidden');
@@ -250,6 +342,10 @@ class GameManager {
         this.loadSoundSettings();
         this.bindEvents();
         this.updatePauseUI();
+        // この版にはスタート画面（難易度の選択）が無いので、これまでと同じ条件のインフェルノで始める。
+        // omcha.jp の公開版はスタート画面で難易度を選び、startGame で applyDifficulty を呼ぶ（v5）
+        this.difficultyId = 'inferno';
+        this.applyDifficulty();
         this.startWave(1);
 
         this.lastTime = performance.now();
@@ -423,7 +519,7 @@ class GameManager {
         const stageBtn = document.getElementById('btn-toggle-stage');
         if (stageBtn) stageBtn.textContent = `Stage: ${this.stage}`;
 
-        document.getElementById('stageDisplay').textContent = `Stage ${this.stage} - ${this.stage === 1 ? 'クラシックスロープ' : 'ロングスロープ'}`;
+        this.updateStageLabel();
     }
 
     updateDebugUI() {
@@ -537,6 +633,7 @@ class GameManager {
             // ① タイタンボスが倒された瞬間の戦況演出
             if (this.titanBoss && !this.titanBoss.isAlive && !this.bossDefeatedTriggered) {
                 this.bossDefeatedTriggered = true;
+                this.markBossDefeated();
                 this.effectManager.triggerBossDefeated('👑 BOSS DEFEATED! 残敵を殲滅せよ！', 3.5);
                 this.effectManager.spawnExplosion(this.titanBoss.x, this.titanBoss.y, 110);
                 window.soundEngine.playExplosion();

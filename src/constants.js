@@ -391,6 +391,16 @@ const SPECIAL_SKILLS = {
     }
 };
 
+// 難易度（v5）。push = 全ボールの押す力の倍率 / mana = マナのたまる速さ・上限・最初の量の倍率 /
+// allSkills = 必殺技を最初から全部使える（false ならウェーブクリアのレリックで順に手に入れる）
+const DIFFICULTIES = {
+    easy:    { id: 'easy',    name: 'イージー',     icon: '🌱', push: 2.0, mana: 2, allSkills: true,  desc: '押す力2倍・マナ2倍・必殺技ぜんぶ' },
+    normal:  { id: 'normal',  name: 'ノーマル',     icon: '⭐', push: 2.0, mana: 1, allSkills: true,  desc: '押す力2倍・必殺技ぜんぶ', lock: '1回遊ぶと解放' },
+    hard:    { id: 'hard',    name: 'ハード',       icon: '🔥', push: 1.5, mana: 1, allSkills: false, desc: '押す力1.5倍・必殺技はクリアでもらう', lock: 'イージーかノーマルでボスをたおすと解放' },
+    inferno: { id: 'inferno', name: 'インフェルノ', icon: '💀', push: 1.0, mana: 1, allSkills: false, desc: '補正なし・必殺技はクリアでもらう', lock: 'ハードでボスをたおすと解放' },
+};
+const DIFFICULTY_ORDER = ['easy', 'normal', 'hard', 'inferno'];
+
 // 必殺技を手に入れる順番（ウェーブクリアのレリック 3 択の 1 枚目に出る。v4）
 const SKILL_UNLOCK_ORDER = ['giga_rock', 'booster_slope', 'pinball_fever'];
 
@@ -638,6 +648,8 @@ window.GAME_CONFIG = GAME_CONFIG;
 window.BALL_TYPES = BALL_TYPES;
 window.SPECIAL_SKILLS = SPECIAL_SKILLS;
 window.SKILL_UNLOCK_ORDER = SKILL_UNLOCK_ORDER;
+window.DIFFICULTIES = DIFFICULTIES;
+window.DIFFICULTY_ORDER = DIFFICULTY_ORDER;
 window.RELIC_POOL = RELIC_POOL;
 window.ENEMY_TYPES = ENEMY_TYPES;
 window.ENEMY_TUNING = ENEMY_TUNING;
