@@ -440,6 +440,21 @@ const RELIC_POOL = [
     }
 ];
 
+// ボス以外の敵の強さの調整（ボス = isBoss の敵には掛けない）
+// 以前はウェーブ 1〜3 でこちらのボールが圧勝し、敵陣にボールが溜まるだけだったので、押し合いになるよう底上げする
+const ENEMY_TUNING = {
+    HP_MULT: 4.0,           // 体力
+    ATK_MULT: 3.0,          // 攻撃力
+    PUSH_BONUS: 3,          // 押し出しパワーの上乗せ
+    MANA_REWARD_MULT: 0.5,  // 倒したときのマナ（数を増やした分、こちらのマナが増えすぎないように）
+    COUNT_MULT: 2,          // ウェーブ 1〜3 の敵の数
+    SPAWN_INTERVAL_MULT: 0.7, // 出てくる間隔（数が増えた分、ウェーブが間延びしないよう詰める）
+    // 同種 2 体が合体したエリート
+    ELITE_HP_MULT: 2.0,     // 体力 = (2 体の体力の和) × これ
+    ELITE_ATK_MULT: 3.0,    // 攻撃力 = 元の攻撃力 × これ
+    ELITE_ARMOR: 0.4,       // 受けるダメージを 40% 減らす
+};
+
 // 敵ユニットタイプ（多彩なバリエーションとアンチ特性）
 const ENEMY_TYPES = {
     GOBLIN: {
@@ -601,3 +616,4 @@ window.BALL_TYPES = BALL_TYPES;
 window.SPECIAL_SKILLS = SPECIAL_SKILLS;
 window.RELIC_POOL = RELIC_POOL;
 window.ENEMY_TYPES = ENEMY_TYPES;
+window.ENEMY_TUNING = ENEMY_TUNING;

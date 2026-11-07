@@ -8,6 +8,9 @@ function consumeAttackTimer(timer, interval) {
     return interval > 0 ? (timer - interval) % interval : 0;
 }
 
+// ゴールに着いたボールが転がり落ちて消えるまでの秒数
+const FALL_TIME = 0.9;
+
 class CombatManager {
     constructor() {
         this.allies = [];
@@ -21,6 +24,8 @@ class CombatManager {
         this.comboTimer = 0;
         // 味方ループの最中に生まれた子玉（分裂セル）。ループ後にまとめて加える
         this.pendingAllies = [];
+        // ゴールに着いて坂の下へ転がり落ちていくボール（見た目だけ。戦闘には加わらない）
+        this.fallingAllies = [];
     }
 
     init(allyBase, enemyBase, effectManager, relicState, coursePath) {
@@ -73,22 +78,21 @@ class CombatManager {
             }
 
             // ① 敵拠点到達判定 (s >= totalLength - 20)
+            // ゴールに着いたボールは止まらず、要塞に 1 回ぶつかってから坂の下へ転がり落ちて消える。
+            // （以前はここで止まって溜まり続け、場の上限 MAX_ALLIES を埋めてしまっていた）
             const allyEffRadius = ally.radius * ally.scaleMultiplier;
             if (ally.s + allyEffRadius >= totalLength - 10) {
-                ally.s = totalLength - 10 - allyEffRadius;
-                shouldStop = true;
-                if (ally.attackTimer >= ally.attackInterval) {
-                    ally.attackTimer = consumeAttackTimer(ally.attackTimer, ally.attackInterval);
-                    if (this.enemyBase.hasBarrier) {
-                        this.effectManager.spawnDamageText(this.enemyBase.x, this.enemyBase.y - 25, '🛡️ BARRIER', false, '#00cec9');
-                        this.effectManager.spawnImpactSparks(this.enemyBase.x, this.enemyBase.y - 10, 4, '#81ecec');
-                        window.soundEngine.playIronImpact();
-                    } else {
-                        this.enemyBase.takeDamage(ally.atk * ally.scaleMultiplier);
-                        this.effectManager.spawnDamageText(this.enemyBase.x, this.enemyBase.y - 20, ally.atk * ally.scaleMultiplier, false, '#e74c3c');
-                        window.soundEngine.playPoko();
-                    }
+                if (this.enemyBase.hasBarrier) {
+                    this.effectManager.spawnDamageText(this.enemyBase.x, this.enemyBase.y - 25, '🛡️ BARRIER', false, '#00cec9');
+                    this.effectManager.spawnImpactSparks(this.enemyBase.x, this.enemyBase.y - 10, 4, '#81ecec');
+                    window.soundEngine.playIronImpact();
+                } else {
+                    this.enemyBase.takeDamage(ally.atk * ally.scaleMultiplier);
+                    this.effectManager.spawnDamageText(this.enemyBase.x, this.enemyBase.y - 20, ally.atk * ally.scaleMultiplier, false, '#e74c3c');
+                    window.soundEngine.playPoko();
                 }
+                this.startFalling(ally);
+                continue;
             }
 
             // ② トゲ玉（SPIKE）の周囲スリップ切断（プラズマ・スパイク取得時はピンポン玉にも微細なトゲが付与される）
@@ -158,7 +162,7 @@ class CombatManager {
             // ④ 味方同士の隊列（前線への滑り込み重なり合いを大幅に許容）
             // スーパーボールは前線を飛び越えて後衛を狙うので、前の味方に詰まって止まらない
             // （止まると狙う敵に届かないまま攻撃もせず棒立ちになる）
-            if (!shouldStop && i > 0 && ally.config.id !== 'super') {
+            if (!shouldStop && i > 0 && ally.config.id !== 'super' && !this.allies[i - 1].isFalling) {
                 const aheadAlly = this.allies[i - 1];
                 const distS = aheadAlly.s - ally.s;
                 // 最小間隔を半径の35%まで詰め込み、団子状に重なることを許可
@@ -343,8 +347,10 @@ class CombatManager {
 
         // 5. 各ユニットの移動更新
         for (const ally of this.allies) {
+            if (ally.isFalling) continue;
             ally.update(dt, this.effectManager, isBoosterActive);
         }
+        this.updateFalling(dt);
         for (const enemy of this.enemies) {
             enemy.update(dt);
         }
@@ -628,9 +634,44 @@ class CombatManager {
         }
         this.allies = [];
         this.pendingAllies = [];
+        this.fallingAllies = [];
+    }
+
+    // ゴールに着いたボールを戦闘から外し、コースの終わりの向きのまま放り出す
+    startFalling(ally) {
+        ally.isFalling = true;
+        ally.isAlive = false;        // 敵の狙い・押し合い・場の数から外す
+        ally.effectTriggered = true; // 撃破の火花は出さない
+        ally.isStopped = false;
+        ally.jumpHeight = 0;
+        const sp = Math.max(90, ally.currentSpeed || 0);
+        ally.fallVx = (ally.tx || -1) * sp;
+        ally.fallVy = (ally.ty || 0) * sp;
+        ally.fallT = 0;
+        this.fallingAllies.push(ally);
+    }
+
+    updateFalling(dt) {
+        if (this.fallingAllies.length === 0) return;
+        for (const b of this.fallingAllies) {
+            b.fallT += dt;
+            b.fallVy += 1100 * dt; // 重力で下へ落ちる
+            b.x += b.fallVx * dt;
+            b.y += b.fallVy * dt;
+            const r = b.radius * b.scaleMultiplier;
+            b.rotation += (b.fallVx >= 0 ? 1 : -1) * (Math.hypot(b.fallVx, b.fallVy) * dt / r);
+        }
+        this.fallingAllies = this.fallingAllies.filter(b => b.fallT < FALL_TIME);
     }
 
     render(ctx) {
+        // 転がり落ちるボールは薄くなりながら消える
+        for (const b of this.fallingAllies) {
+            ctx.save();
+            ctx.globalAlpha = Math.max(0, 1 - b.fallT / FALL_TIME);
+            b.render(ctx);
+            ctx.restore();
+        }
         for (const enemy of this.enemies) {
             enemy.render(ctx);
         }
