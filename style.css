@@ -647,3 +647,14 @@ body {
     border-color: #576574;
     box-shadow: none;
 }
+
+/* v6: 自己ベスト・友だちの記録・シェア */
+.result-extra { font-size: 13px; font-weight: bold; color: #feca57; min-height: 1em; margin: 2px 0 8px; line-height: 1.5; }
+.share-box { margin: 4px 0 12px; padding: 8px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); }
+.share-title { font-size: 12px; color: #dfe6e9; margin-bottom: 6px; }
+.share-row { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+.share-btn { border: 0; border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: bold; color: #fff; cursor: pointer; font-family: inherit; }
+.share-x { background: #000; border: 1px solid #636e72; }
+.share-line { background: #06c755; }
+.share-more { background: #576574; }
+.share-status { font-size: 11px; color: #81ecec; min-height: 1em; margin-top: 4px; }
