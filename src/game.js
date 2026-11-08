@@ -23,6 +23,9 @@ const safeStorage = {
 // （エリート合体・周回の補正が乗った manaReward を使うので、強い敵ほど高い）
 const SCORE_PER_MANA_REWARD = 5;
 
+// シェアで送る URL（omcha.jp の固定ページ。?td_score=…&td_diff=… を付けて「友だちの記録」にする。v6）
+const SHARE_PAGE_URL = 'https://omcha.jp/sakamichi-td/';
+
 class GameManager {
     constructor() {
         this.canvas = null;
@@ -113,7 +116,9 @@ class GameManager {
             btn.className = 'diff-btn' + (id === this.difficultyId ? ' selected' : '') + (unlocked ? '' : ' locked');
             btn.dataset.diff = id;
             btn.disabled = !unlocked;
-            btn.innerHTML = `<span class="diff-name">${unlocked ? d.icon : '🔒'} ${d.name}</span><span class="diff-desc">${unlocked ? d.desc : d.lock}</span>`;
+            const best = unlocked ? this.getDifficultyBest(id) : 0;
+            btn.innerHTML = `<span class="diff-name">${unlocked ? d.icon : '🔒'} ${d.name}</span><span class="diff-desc">${unlocked ? d.desc : d.lock}</span>`
+                + (best > 0 ? `<span class="diff-best">ベスト ${best.toLocaleString()}</span>` : '');
             btn.addEventListener('click', () => {
                 if (!this.isDifficultyUnlocked(id)) return;
                 this.difficultyId = id;
@@ -175,6 +180,93 @@ class GameManager {
         if (this.score > this.bestScore) {
             this.bestScore = this.score;
             safeStorage.set('sakamichiTD_bestScore', String(this.bestScore));
+        }
+        // 難易度ごとの自己ベスト（v6）
+        const id = this.difficulty ? this.difficulty.id : 'inferno';
+        this.prevDiffBest = this.getDifficultyBest(id);
+        this.isNewRecord = this.score > this.prevDiffBest && this.score > 0;
+        if (this.isNewRecord) safeStorage.set('sakamichiTD_best_' + id, String(this.score));
+    }
+
+    getDifficultyBest(id) {
+        return Number(safeStorage.get('sakamichiTD_best_' + id)) || 0;
+    }
+
+    // シェアされた URL の ?td_score=…&td_diff=… を「友だちの記録」として読む（v6）。
+    // ゲームは omcha.jp の固定ページの iframe（同じオリジン）か、全画面リンクで直接開かれる
+    readChallenge() {
+        let search = '';
+        try { search = window.top.location.search || ''; } catch (e) {}
+        if (!search) search = window.location.search || '';
+        const q = new URLSearchParams(search);
+        const score = parseInt(q.get('td_score'), 10);
+        const diff = q.get('td_diff');
+        if (!Number.isFinite(score) || score <= 0 || score > 10000000 || !DIFFICULTIES[diff]) return null;
+        return { score, diff };
+    }
+
+    renderChallenge() {
+        const el = document.getElementById('challengeText');
+        if (!el || !this.challenge) return;
+        const d = DIFFICULTIES[this.challenge.diff];
+        el.textContent = `🏁 友だちの記録: ${d.icon}${d.name} ${this.challenge.score.toLocaleString()} 点 — こえられるかな？`;
+        el.classList.remove('hidden');
+    }
+
+    // 結果画面の「自己ベスト更新」「友だちの記録との差」の 1 行
+    resultExtraText() {
+        const parts = [];
+        if (this.isNewRecord) parts.push('🎉 自己ベスト更新！');
+        const c = this.challenge;
+        if (c) {
+            const d = DIFFICULTIES[c.diff];
+            if (this.difficulty && c.diff === this.difficulty.id) {
+                parts.push(this.score > c.score
+                    ? `🏁 友だちの記録 ${c.score.toLocaleString()} 点をこえた！`
+                    : `🏁 友だちの記録まで あと ${(c.score - this.score + 1).toLocaleString()} 点`);
+            } else {
+                parts.push(`🏁 友だちの記録は ${d.icon}${d.name} の ${c.score.toLocaleString()} 点`);
+            }
+        }
+        return parts.join(' ');
+    }
+
+    scoreLine() {
+        const d = this.difficulty || DIFFICULTIES.inferno;
+        const best = Math.max(this.score, this.prevDiffBest || 0);
+        return `スコア: ${this.score.toLocaleString()}（${d.name}のベスト: ${best.toLocaleString()}）`;
+    }
+
+    showResult(prefix) {
+        const scoreEl = document.getElementById(prefix + 'ScoreText');
+        if (scoreEl) scoreEl.textContent = this.scoreLine();
+        const extra = document.getElementById(prefix + 'Extra');
+        if (extra) extra.textContent = this.resultExtraText();
+        document.querySelectorAll('.share-status').forEach(e => { e.textContent = ''; });
+    }
+
+    // シェアの文と URL。URL を開いた人には、この得点が「友だちの記録」として出る
+    shareData() {
+        const d = this.difficulty || DIFFICULTIES.inferno;
+        const how = this.isVictory ? (this.loopCount > 0 ? `${this.loopCount + 1}周目クリア` : 'ボスをたおした') : `Wave ${this.wave} まで`;
+        const text = `坂道TDの${d.icon}${d.name}で ${this.score.toLocaleString()} 点！（${how}）きみはこえられる？ #坂道TD`;
+        const url = `${SHARE_PAGE_URL}?td_score=${this.score}&td_diff=${d.id}`;
+        return { title: '坂道TD', text, url };
+    }
+
+    share(kind, statusEl) {
+        const s = this.shareData();
+        const say = (m) => { if (statusEl) statusEl.textContent = m; };
+        if (kind === 'x') {
+            window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(s.text)}&url=${encodeURIComponent(s.url)}`, '_blank', 'noopener');
+        } else if (kind === 'line') {
+            window.open(`https://social-plugins.line.me/lineit/share?url=${encodeURIComponent(s.url)}&text=${encodeURIComponent(s.text)}`, '_blank', 'noopener');
+        } else if (navigator.share) {
+            navigator.share(s).catch(() => {});
+        } else if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(`${s.text} ${s.url}`).then(() => say('コピーしました。LINE やメッセージに貼りつけてね'), () => say('コピーできませんでした'));
+        } else {
+            say('この端末ではコピーできませんでした');
         }
     }
 
@@ -271,8 +363,7 @@ class GameManager {
         window.soundEngine.playVictory();
         this.saveBestScoreIfNeeded();
         this.markPlayed();
-        const scoreEl = document.getElementById('victoryScoreText');
-        if (scoreEl) scoreEl.textContent = `スコア: ${this.score}（ベスト: ${this.bestScore}）`;
+        this.showResult('victory');
         const loopBtn = document.getElementById('btn-loop-continue');
         if (loopBtn) loopBtn.innerHTML = `🔁 強くてニューゲーム (${this.loopCount + 2}周目へ)<br><small>敵の攻撃力と防御力が ${this.loopCount + 2} 倍に</small>`;
         document.getElementById('victoryModal')?.classList.remove('hidden');
@@ -283,8 +374,7 @@ class GameManager {
         window.soundEngine.playDefeat();
         this.saveBestScoreIfNeeded();
         this.markPlayed();
-        const scoreEl = document.getElementById('defeatScoreText');
-        if (scoreEl) scoreEl.textContent = `スコア: ${this.score}（ベスト: ${this.bestScore}）`;
+        this.showResult('defeat');
         document.getElementById('defeatModal')?.classList.remove('hidden');
     }
 
@@ -353,6 +443,13 @@ class GameManager {
     }
 
     bindEvents() {
+        // 友だちの記録（シェアされた URL から来たとき）とシェアボタン（v6）。
+        // この版にはスタート画面が無いので、友だちの記録は結果画面にだけ出る
+        this.challenge = this.readChallenge();
+        document.querySelectorAll('.share-btn').forEach(btn => {
+            btn.addEventListener('click', () => this.share(btn.dataset.share, btn.closest('.share-box')?.querySelector('.share-status')));
+        });
+
         const unlockAudio = () => {
             window.soundEngine.init();
             window.removeEventListener('click', unlockAudio);
